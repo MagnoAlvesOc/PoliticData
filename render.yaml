@@ -1,0 +1,22 @@
+services:
+  - type: web
+    name: politicdata-2028
+    runtime: python
+    plan: starter
+    rootDir: politicdata
+    buildCommand: echo "Python standard library - no build dependencies"
+    startCommand: python app.py
+    healthCheckPath: /
+    envVars:
+      - key: POLITICDATA_DB
+        value: /var/data/politicdata.db
+      - key: POLITICDATA_HOST
+        value: 0.0.0.0
+      - key: POLITICDATA_ADMIN
+        value: admin
+      - key: POLITICDATA_PASSWORD
+        sync: false
+    disk:
+      name: politicdata-db
+      mountPath: /var/data
+      sizeGB: 1
