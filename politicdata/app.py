@@ -42,7 +42,7 @@ def init():
         if 'review_status' not in expense_cols:
             db.execute("ALTER TABLE expenses ADD COLUMN review_status TEXT NOT NULL DEFAULT 'pendente'")
         leader_cols={r[1] for r in db.execute('PRAGMA table_info(leaders)')}
-        for col in ('nickname','activity'):
+        for col in ('nickname','activity','electoral_zone','electoral_section','address'):
             if col not in leader_cols:
                 db.execute(f'ALTER TABLE leaders ADD COLUMN {col} TEXT')
         count=db.execute('SELECT count(*) FROM users').fetchone()[0]
@@ -55,6 +55,46 @@ def init():
             salt=secrets.token_hex(16)
             hashed=hashlib.pbkdf2_hmac('sha256',password.encode(),bytes.fromhex(salt),260000).hex()
             db.execute('INSERT INTO users(username,password_hash,salt) VALUES(?,?,?)',(user,hashed,salt))
+
+def restore_official_elections():
+    """Restaurar base pública oficial a partir do CSV versionado no repositório.
+    Faz upsert idempotente; jamais elimina cadastros ou dados administrativos.
+    """
+    source_file=BASE/'data'/'politicdata_sao_luis_2024_CORRIGIDO.csv'
+    if not source_file.is_file():
+        print('Base oficial ainda não disponível no pacote: '+str(source_file),flush=True)
+        return
+    with connect() as db:
+        present=db.execute("SELECT count(*) FROM elections WHERE election_year=2024 AND municipality='São Luís' AND candidate='TOTAL VOTOS NOMINAIS - VEREADOR'").fetchone()[0]
+        if present>=2173:
+            print('Base TSE São Luís 2024 já cadastrada: '+str(present)+' registros',flush=True)
+            return
+        imported=0
+        with source_file.open('r',encoding='utf-8-sig',newline='') as f:
+            reader=csv.DictReader(f)
+            expected={'election_year','round','office','municipality','zone','section','candidate','votes','source'}
+            if not expected.issubset(set(reader.fieldnames or [])):
+                raise ValueError('CSV TSE empacotado possui colunas inválidas')
+            for x in reader:
+                if x.get('municipality')!='São Luís' or str(x.get('election_year'))!='2024':
+                    continue
+                def nullable_int(key):
+                    val=str(x.get(key) or '').strip()
+                    return int(val) if val else None
+                def nullable_float(key):
+                    val=str(x.get(key) or '').strip()
+                    return float(val) if val else None
+                db.execute("""INSERT INTO elections(election_year,round,office,municipality,neighborhood,zone,section,polling_place,candidate,votes,eligible,turnout,latitude,longitude,source)
+                    VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    ON CONFLICT(election_year,round,office,municipality,zone,section,candidate)
+                    DO UPDATE SET neighborhood=excluded.neighborhood,polling_place=excluded.polling_place,
+                    votes=excluded.votes,eligible=excluded.eligible,turnout=excluded.turnout,
+                    latitude=excluded.latitude,longitude=excluded.longitude,source=excluded.source""",
+                    (2024,int(x.get('round') or 1),x['office'],x['municipality'],x.get('neighborhood',''),
+                     x['zone'],x['section'],x.get('polling_place',''),x['candidate'],int(x['votes']),
+                     nullable_int('eligible'),nullable_int('turnout'),nullable_float('latitude'),nullable_float('longitude'),x['source']))
+                imported+=1
+        print('Base histórica oficial restaurada: '+str(imported)+' linhas',flush=True)
 
 def rows(db,sql,args=()): return [dict(x) for x in db.execute(sql,args).fetchall()]
 def check_password(p,salt,expected): return hmac.compare_digest(hashlib.pbkdf2_hmac('sha256',p.encode(),bytes.fromhex(salt),260000).hex(),expected)
@@ -163,7 +203,7 @@ class Handler(BaseHTTPRequestHandler):
                     if not isinstance(raw,str) or len(raw)>4_000_000: raise ValueError('Arquivo CSV inválido ou muito grande')
                     dialect=csv.Sniffer().sniff(raw[:4096],delimiters=',;\t')
                     reader=csv.DictReader(io.StringIO(raw),dialect=dialect)
-                    aliases={'nome':'name','name':'name','apelido':'nickname','nickname':'nickname','telefone':'phone','phone':'phone','bairro':'neighborhood','neighborhood':'neighborhood','regiao':'region','região':'region','region':'region','atuacao':'activity','atuação':'activity','activity':'activity','observacoes':'notes','observações':'notes','notes':'notes'}
+                    aliases={'nome':'name','name':'name','apelido':'nickname','nickname':'nickname','telefone':'phone','phone':'phone','bairro':'neighborhood','neighborhood':'neighborhood','regiao':'region','região':'region','region':'region','atuacao':'activity','atuação':'activity','activity':'activity','zona':'electoral_zone','zona eleitoral':'electoral_zone','secao':'electoral_section','sessao':'electoral_section','seção':'electoral_section','endereco':'address','endereço':'address','observacoes':'notes','observações':'notes','notes':'notes'}
                     import unicodedata
                     def canonical(k):
                         k=unicodedata.normalize('NFKD',str(k or '').strip().lower())
@@ -171,7 +211,7 @@ class Handler(BaseHTTPRequestHandler):
                         return aliases.get(k)
                     fieldmap={k:canonical(k) for k in (reader.fieldnames or [])}
                     if 'name' not in fieldmap.values(): raise ValueError('É necessária uma coluna Nome')
-                    rejected={'cpf','nome da mae','mae','endereco','votos fixos','votos previstos','voto','eleitor','zona','sessao','secao','seção'}
+                    rejected={'cpf','nome da mae','mae','endereco','votos fixos','votos previstos','voto','eleitor'}
                     for k in (reader.fieldnames or []):
                         norm=unicodedata.normalize('NFKD',str(k).lower())
                         norm=''.join(c for c in norm if not unicodedata.combining(c)).strip()
@@ -183,13 +223,13 @@ class Handler(BaseHTTPRequestHandler):
                         if not rec.get('name'): skipped+=1;continue
                         exists=db.execute('SELECT 1 FROM leaders WHERE lower(trim(name))=lower(trim(?)) AND lower(trim(coalesce(neighborhood,'')))=lower(trim(?))',(rec['name'],rec.get('neighborhood',''))).fetchone()
                         if exists: skipped+=1;continue
-                        db.execute('INSERT INTO leaders(name,nickname,phone,region,neighborhood,activity,notes) VALUES(?,?,?,?,?,?,?)',tuple(rec.get(k,'') for k in ('name','nickname','phone','region','neighborhood','activity','notes')))
+                        db.execute('INSERT INTO leaders(name,nickname,phone,region,neighborhood,activity,notes,electoral_zone,electoral_section,address) VALUES(?,?,?,?,?,?,?,?,?,?)',tuple(rec.get(k,'') for k in ('name','nickname','phone','region','neighborhood','activity','notes','electoral_zone','electoral_section','address')))
                         imported+=1
                     return self.send(200,{'ok':True,'imported':imported,'skipped':skipped})
                 elif path=='/api/leaders':
                     name=clean(b.get('name'),150)
                     if not name:raise ValueError('Nome obrigatório')
-                    cur=db.execute('INSERT INTO leaders(name,nickname,phone,region,neighborhood,activity,notes) VALUES(?,?,?,?,?,?,?)',(name,clean(b.get('nickname'),100),clean(b.get('phone'),70),clean(b.get('region'),100),clean(b.get('neighborhood'),120),clean(b.get('activity'),120),clean(b.get('notes'))))
+                    cur=db.execute('INSERT INTO leaders(name,nickname,phone,region,neighborhood,activity,notes,electoral_zone,electoral_section,address) VALUES(?,?,?,?,?,?,?,?,?,?)',(name,clean(b.get('nickname'),100),clean(b.get('phone'),70),clean(b.get('region'),100),clean(b.get('neighborhood'),120),clean(b.get('activity'),120),clean(b.get('notes')),clean(b.get('electoral_zone'),20),clean(b.get('electoral_section'),20),clean(b.get('address'),250)))
                 elif path=='/api/meetings':
                     cur=db.execute('INSERT INTO meetings(leader_id,meeting_date,kind,summary,next_action) VALUES(?,?,?,?,?)',(int(b['leader_id']),date_ok(b['meeting_date']),clean(b.get('kind'),60) or 'reunião',clean(b['summary']),clean(b.get('next_action'))))
                 elif path=='/api/demands':
@@ -229,6 +269,7 @@ class Handler(BaseHTTPRequestHandler):
 
 def main():
     init()
+    restore_official_elections()
     host=os.environ.get('POLITICDATA_HOST','0.0.0.0' if os.environ.get('RENDER') else '127.0.0.1');port=int(os.environ.get('PORT',os.environ.get('POLITICDATA_PORT','8765')))
     print(f'PoliticData disponível em http://{host}:{port}',flush=True)
     ThreadingHTTPServer((host,port),Handler).serve_forever()
