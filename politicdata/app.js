@@ -189,11 +189,20 @@ async function contactPage(){
  let records=await api('contacts');
  const options='<option value="">Sem vínculo</option>'+leaders.map(l=>`<option value="${l.id}">${esc(l.name)}</option>`).join('');
  $('#content').innerHTML='<div class="notice">Diretório de contatos para fins administrativos e atendimento, com vínculo opcional à liderança. Não registre intenção de voto, promessas eleitorais ou perfis políticos.</div>'+
- '<div class="card"><h3>Contatos administrativos ('+records.length+')</h3>'+table(['Nome','Telefone','Bairro','Liderança','Ações'],records.map(c=>`<tr><td>${esc(c.name)}</td><td>${esc(c.phone)}</td><td>${esc(c.neighborhood)}</td><td>${esc(c.leader_name||'Sem vínculo')}</td><td><button class="outline" data-contact-edit="${c.id}">Editar</button></td></tr>`))+'</div><div id="contactEditArea"></div>'+
+ '<div class="card"><h3>Contatos administrativos ('+records.length+')</h3><div class="filters"><label>Liderança<select id="contactFilterLeader"><option value="all">Todas as lideranças</option>'+options+' </select></label><label>Buscar por nome, telefone ou bairro<input id="contactFilterSearch" placeholder="Digite para pesquisar"></label><label>Bairro<select id="contactFilterBairro"><option value="">Todos os bairros</option>'+unique(records.map(c=>c.neighborhood).filter(Boolean)).map(b=>'<option value="'+esc(b)+'">'+esc(b)+'</option>').join('')+'</select></label></div><p class="muted mini" id="contactCount"></p><div id="contactList"></div></div><div id="contactEditArea"></div>'+
  form('Novo contato',field('Nome','name','text','required')+field('Telefone','phone')+field('Bairro','neighborhood')+`<label>Liderança responsável (opcional)<select name="leader_id">${options}</select></label>`+'<label class="wide">Observações administrativas<textarea name="notes"></textarea></label>','contactForm')+
  `<div class="card section"><h3>Importar contatos em Excel ou CSV</h3><p class="muted">Colunas: Nome, Telefone, Bairro, Observações e opcionalmente ID Liderança. A seleção abaixo substitui a liderança indicada nas linhas. Se vazia, cada linha pode indicar um ID ou ficar sem vínculo.</p><label>Arquivo Excel / CSV<input id="contactFile" type="file" accept=".xlsx,.xls,.csv"></label><label>Liderança para todo o arquivo (opcional)<select id="contactOwner">${options}</select></label><button class="primary" id="contactUpload">Importar contatos</button><div id="contactImportResult" role="status"></div></div>`;
  attachForm('contactForm','contacts');
- document.querySelectorAll('[data-contact-edit]').forEach(button=>button.onclick=()=>{
+ function renderContactList(){
+   const leader=$('#contactFilterLeader').value,search=$('#contactFilterSearch').value.toLocaleLowerCase('pt-BR').trim(),bairro=$('#contactFilterBairro').value;
+   const shown=records.filter(c=>(leader==='all'||(leader===''?!c.leader_id:String(c.leader_id)===leader))&&(!bairro||c.neighborhood===bairro)&&(!search||[c.name,c.phone,c.neighborhood].some(v=>String(v||'').toLocaleLowerCase('pt-BR').includes(search))));
+   $('#contactCount').textContent=shown.length+' de '+records.length+' contatos exibidos';
+   $('#contactList').innerHTML=table(['Nome','Telefone','Bairro','Liderança','Ações'],shown.map(c=>`<tr><td>${esc(c.name)}</td><td>${esc(c.phone)}</td><td>${esc(c.neighborhood)}</td><td>${esc(c.leader_name||'Sem vínculo')}</td><td><button class="outline" data-contact-edit="${c.id}">Editar</button></td></tr>`));
+   document.querySelectorAll('[data-contact-edit]').forEach(button=>button.onclick=()=>editContact(Number(button.dataset.contactEdit)));
+ }
+ ['contactFilterLeader','contactFilterSearch','contactFilterBairro'].forEach(id=>$('#'+id).addEventListener(id==='contactFilterSearch'?'input':'change',renderContactList));
+ function editContact(contactId){
+   const c=records.find(row=>row.id===contactId);if(!c)return;
    const c=records.find(row=>row.id===Number(button.dataset.contactEdit));if(!c)return;
    const box=$('#contactEditArea');
    box.innerHTML=form('Corrigir cadastro: '+esc(c.name),field('Nome','name','text','required maxlength="150"')+
@@ -212,7 +221,8 @@ async function contactPage(){
      }catch(err){alert(err.message)}
    };
    box.scrollIntoView({behavior:'smooth',block:'start'});
- });
+ }
+ renderContactList();
  $('#contactUpload').onclick=async()=>{
   const file=$('#contactFile').files[0];if(!file)return alert('Escolha um arquivo');
   try{
