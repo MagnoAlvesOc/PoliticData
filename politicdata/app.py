@@ -45,6 +45,13 @@ def init():
         for col in ('nickname','activity','electoral_zone','electoral_section','address'):
             if col not in leader_cols:
                 db.execute(f'ALTER TABLE leaders ADD COLUMN {col} TEXT')
+        db.execute("""CREATE TABLE IF NOT EXISTS contacts(
+            id INTEGER PRIMARY KEY, name TEXT NOT NULL, phone TEXT, neighborhood TEXT,
+            notes TEXT, leader_id INTEGER REFERENCES leaders(id) ON DELETE SET NULL,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP)""")
+        db.execute("CREATE INDEX IF NOT EXISTS idx_contacts_leader ON contacts(leader_id)")
+        leader_cols={r[1] for r in db.execute('PRAGMA table_info(leaders)')}
+        if 'archived' not in leader_cols: db.execute("ALTER TABLE leaders ADD COLUMN archived INTEGER NOT NULL DEFAULT 0")
         count=db.execute('SELECT count(*) FROM users').fetchone()[0]
         if count==0:
             user=os.environ.get('POLITICDATA_ADMIN','admin')
@@ -178,7 +185,9 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send(200,d)
             if path=='/api/leader-summary':
                 return self.send(200,rows(db,"SELECT COALESCE(NULLIF(trim(neighborhood),''),'Não informado') neighborhood,count(*) total FROM leaders GROUP BY COALESCE(NULLIF(trim(neighborhood),''),'Não informado') ORDER BY total DESC"))
-            if path=='/api/leaders':return self.send(200,rows(db,'SELECT l.*, (SELECT max(meeting_date) FROM meetings WHERE leader_id=l.id) last_meeting,(SELECT count(*) FROM demands WHERE leader_id=l.id AND status IN (\'aberta\',\'em andamento\')) open_demands FROM leaders l ORDER BY l.name'))
+            if path=='/api/contacts':
+                return self.send(200,rows(db,"SELECT c.*,l.name leader_name FROM contacts c LEFT JOIN leaders l ON l.id=c.leader_id ORDER BY c.name LIMIT 10000"))
+            if path=='/api/leaders':return self.send(200,rows(db,'SELECT l.*, (SELECT max(meeting_date) FROM meetings WHERE leader_id=l.id) last_meeting,(SELECT count(*) FROM demands WHERE leader_id=l.id AND status IN (\'aberta\',\'em andamento\')) open_demands FROM leaders l WHERE l.archived=0 ORDER BY l.name'))
             if path=='/api/meetings':return self.send(200,rows(db,'SELECT m.*,l.name leader_name FROM meetings m JOIN leaders l ON l.id=m.leader_id ORDER BY meeting_date DESC,id DESC'))
             if path=='/api/demands':return self.send(200,rows(db,'SELECT d.*,l.name leader_name FROM demands d JOIN leaders l ON l.id=d.leader_id ORDER BY opened_at DESC,id DESC'))
             if path=='/api/expenses':return self.send(200,rows(db,'SELECT e.*,l.name leader_name FROM expenses e LEFT JOIN leaders l ON l.id=e.leader_id ORDER BY expense_date DESC,id DESC'))
@@ -236,6 +245,43 @@ class Handler(BaseHTTPRequestHandler):
                         db.execute('INSERT INTO leaders(name,nickname,phone,region,neighborhood,activity,notes,electoral_zone,electoral_section,address) VALUES(?,?,?,?,?,?,?,?,?,?)',tuple(rec.get(k,'') for k in ('name','nickname','phone','region','neighborhood','activity','notes','electoral_zone','electoral_section','address')))
                         imported+=1
                     return self.send(200,{'ok':True,'imported':imported,'skipped':skipped})
+                elif path=='/api/leaders/update':
+                    lid=int(b['id']); name=clean(b.get('name'),150)
+                    if not name:raise ValueError('Nome obrigatório')
+                    fields=['name','nickname','phone','region','neighborhood','activity','notes','electoral_zone','electoral_section','address']
+                    vals=[clean(b.get(k),4000 if k=='notes' else 250) for k in fields]
+                    cur=db.execute("UPDATE leaders SET "+','.join(k+'=?' for k in fields)+" WHERE id=? AND archived=0",(*vals,lid))
+                    if not cur.rowcount:raise ValueError('Liderança não encontrada')
+                elif path=='/api/leaders/archive':
+                    lid=int(b['id'])
+                    cur=db.execute("UPDATE leaders SET archived=1 WHERE id=? AND archived=0",(lid,))
+                    if not cur.rowcount:raise ValueError('Liderança não encontrada')
+                elif path=='/api/contacts':
+                    name=clean(b.get('name'),150)
+                    if not name:raise ValueError('Nome obrigatório')
+                    lid=int(b['leader_id']) if b.get('leader_id') else None
+                    cur=db.execute("INSERT INTO contacts(name,phone,neighborhood,notes,leader_id) VALUES(?,?,?,?,?)",
+                        (name,clean(b.get('phone'),70),clean(b.get('neighborhood'),120),clean(b.get('notes'),500),lid))
+                elif path=='/api/contacts/import':
+                    records=b.get('rows')
+                    if not isinstance(records,list) or len(records)>1000:raise ValueError('Envie até 1.000 contatos por lote')
+                    fixed=int(b['leader_id']) if b.get('leader_id') else None
+                    imported=0;skipped=0
+                    for rec in records:
+                        if not isinstance(rec,dict):skipped+=1;continue
+                        name=clean(rec.get('name'),150);phone=clean(rec.get('phone'),70)
+                        neighborhood=clean(rec.get('neighborhood'),120)
+                        if not name:skipped+=1;continue
+                        lid=fixed if fixed else (int(rec['leader_id']) if str(rec.get('leader_id') or '').strip() else None)
+                        if lid and not db.execute("SELECT 1 FROM leaders WHERE id=? AND archived=0",(lid,)).fetchone():
+                            skipped+=1;continue
+                        found=db.execute("""SELECT id FROM contacts WHERE lower(name)=lower(?) AND
+                        coalesce(phone,'')=? AND coalesce(leader_id,0)=coalesce(?,0)""",(name,phone,lid)).fetchone()
+                        if found:skipped+=1;continue
+                        db.execute("INSERT INTO contacts(name,phone,neighborhood,notes,leader_id) VALUES(?,?,?,?,?)",
+                            (name,phone,neighborhood,clean(rec.get('notes'),500),lid))
+                        imported+=1
+                    return self.send(200,{'imported':imported,'skipped':skipped})
                 elif path=='/api/leaders':
                     name=clean(b.get('name'),150)
                     if not name:raise ValueError('Nome obrigatório')
