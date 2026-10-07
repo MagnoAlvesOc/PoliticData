@@ -189,10 +189,30 @@ async function contactPage(){
  let records=await api('contacts');
  const options='<option value="">Sem vínculo</option>'+leaders.map(l=>`<option value="${l.id}">${esc(l.name)}</option>`).join('');
  $('#content').innerHTML='<div class="notice">Diretório de contatos para fins administrativos e atendimento, com vínculo opcional à liderança. Não registre intenção de voto, promessas eleitorais ou perfis políticos.</div>'+
- '<div class="card"><h3>Contatos administrativos ('+records.length+')</h3>'+table(['Nome','Telefone','Bairro','Liderança'],records.map(c=>`<tr><td>${esc(c.name)}</td><td>${esc(c.phone)}</td><td>${esc(c.neighborhood)}</td><td>${esc(c.leader_name||'Sem vínculo')}</td></tr>`))+'</div>'+
+ '<div class="card"><h3>Contatos administrativos ('+records.length+')</h3>'+table(['Nome','Telefone','Bairro','Liderança','Ações'],records.map(c=>`<tr><td>${esc(c.name)}</td><td>${esc(c.phone)}</td><td>${esc(c.neighborhood)}</td><td>${esc(c.leader_name||'Sem vínculo')}</td><td><button class="outline" data-contact-edit="${c.id}">Editar</button></td></tr>`))+'</div><div id="contactEditArea"></div>'+
  form('Novo contato',field('Nome','name','text','required')+field('Telefone','phone')+field('Bairro','neighborhood')+`<label>Liderança responsável (opcional)<select name="leader_id">${options}</select></label>`+'<label class="wide">Observações administrativas<textarea name="notes"></textarea></label>','contactForm')+
  `<div class="card section"><h3>Importar contatos em Excel ou CSV</h3><p class="muted">Colunas: Nome, Telefone, Bairro, Observações e opcionalmente ID Liderança. A seleção abaixo substitui a liderança indicada nas linhas. Se vazia, cada linha pode indicar um ID ou ficar sem vínculo.</p><label>Arquivo Excel / CSV<input id="contactFile" type="file" accept=".xlsx,.xls,.csv"></label><label>Liderança para todo o arquivo (opcional)<select id="contactOwner">${options}</select></label><button class="primary" id="contactUpload">Importar contatos</button><div id="contactImportResult" role="status"></div></div>`;
  attachForm('contactForm','contacts');
+ document.querySelectorAll('[data-contact-edit]').forEach(button=>button.onclick=()=>{
+   const c=records.find(row=>row.id===Number(button.dataset.contactEdit));if(!c)return;
+   const box=$('#contactEditArea');
+   box.innerHTML=form('Corrigir cadastro: '+esc(c.name),field('Nome','name','text','required maxlength="150"')+
+     field('Telefone','phone')+field('Bairro','neighborhood')+
+     `<label>Liderança vinculada<select name="leader_id">${options}</select></label>`+
+     '<label class="wide">Observações administrativas<textarea name="notes"></textarea></label>','editContactForm');
+   const f=$('#editContactForm');
+   for(const key of ['name','phone','neighborhood','notes','leader_id']){
+     const input=f.elements.namedItem(key);if(input)input.value=c[key]??'';
+   }
+   f.onsubmit=async event=>{
+     event.preventDefault();
+     try{
+       await api('contacts/update','POST',{...Object.fromEntries(new FormData(f)),id:c.id});
+       msg('Contato atualizado');await navigate('contacts');
+     }catch(err){alert(err.message)}
+   };
+   box.scrollIntoView({behavior:'smooth',block:'start'});
+ });
  $('#contactUpload').onclick=async()=>{
   const file=$('#contactFile').files[0];if(!file)return alert('Escolha um arquivo');
   try{
