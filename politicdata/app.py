@@ -277,7 +277,7 @@ class Handler(BaseHTTPRequestHandler):
                         return aliases.get(k)
                     fieldmap={k:canonical(k) for k in (reader.fieldnames or [])}
                     if 'name' not in fieldmap.values(): raise ValueError('É necessária uma coluna Nome')
-                    rejected={'cpf','nome da mae','mae','endereco','votos fixos','votos previstos','voto','eleitor'}
+                    rejected={'cpf','nome da mae','mae','votos fixos','votos previstos','voto','eleitor'}
                     for k in (reader.fieldnames or []):
                         norm=unicodedata.normalize('NFKD',str(k).lower())
                         norm=''.join(c for c in norm if not unicodedata.combining(c)).strip()
