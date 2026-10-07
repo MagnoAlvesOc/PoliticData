@@ -96,6 +96,17 @@ function initBairrosLayer(map){
    }catch(err){msg.textContent='Não foi possível carregar: '+err.message}
  };
  draw();
+ fetch('/setores-ibge.geojson',{cache:'no-cache'}).then(async response=>{
+   if(!response.ok)return null;
+   const data=await response.json();
+   if(data?.type!=='FeatureCollection'||!Array.isArray(data.features))return null;
+   return data;
+ }).then(data=>{
+   if(!data)return;
+   try{localStorage.setItem(BAIRROS_KEY,JSON.stringify(data))}catch(e){}
+   draw();
+   msg.textContent+=' · Carregada automaticamente do repositório.';
+ }).catch(err=>{console.warn('Malha oficial indisponível',err)});
 }
 async function mapPage(){await getElectionData();$('#content').innerHTML=`<div class="notice">O mapa usa apenas coordenadas que você incluiu no CSV de resultados públicos. A intensidade representa a soma de votos históricos dos registros selecionados, não votos futuros.</div><div class="card"><h3>Filtro territorial</h3>${filterUI()}</div><div class="card section"><div id="map"></div><p class="muted mini">Mapa de intensidade dos resultados agregados por local de votação. Requer internet para carregar os mapas do OpenStreetMap e a biblioteca Leaflet.</p></div><div id="mapStats" class="section"></div>`;if(typeof L==='undefined'){$('#map').innerHTML='Biblioteca de mapas indisponível. Verifique sua conexão.';return}mapInstance=L.map('map').setView([-2.53,-44.30],11);L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{attribution:'© OpenStreetMap contributors',maxZoom:19}).addTo(mapInstance);let layer=L.layerGroup().addTo(mapInstance);initBairrosLayer(mapInstance);function draw(){layer.clearLayers();let data=filteredElection();let points=new Map;data.forEach(x=>{if(x.latitude===null||x.longitude===null)return;let lat=Number(x.latitude),lon=Number(x.longitude);if(!Number.isFinite(lat)||!Number.isFinite(lon))return;let key=lat.toFixed(5)+';'+lon.toFixed(5);let obj=points.get(key)||{lat,lon,votes:0,names:new Set};obj.votes+=Number(x.votes);obj.names.add(x.polling_place||x.municipality);points.set(key,obj)});let vals=[...points.values()],max=Math.max(1,...vals.map(x=>x.votes));vals.forEach(x=>{let scale=x.votes/max;L.circleMarker([x.lat,x.lon],{radius:7+20*Math.sqrt(scale),fillColor:scale>.65?'#b91c1c':scale>.3?'#ea580c':'#f59e0b',color:'#fff',weight:1,fillOpacity:.25+.55*scale}).bindPopup(`<b>${esc([...x.names].join(', '))}</b><br>Votos históricos: ${fmt(x.votes)}`).addTo(layer)});if(vals.length)mapInstance.fitBounds(L.latLngBounds(vals.map(x=>[x.lat,x.lon])).pad(.25));$('#mapStats').innerHTML=`<div class="card"><b>${fmt(vals.length)}</b> locais georreferenciados · <b>${fmt(data.reduce((s,x)=>s+Number(x.votes),0))}</b> votos históricos no filtro</div>`}document.querySelectorAll('.filters select').forEach(s=>s.addEventListener('change',draw));draw();setTimeout(()=>mapInstance.invalidateSize(),200)}
 
