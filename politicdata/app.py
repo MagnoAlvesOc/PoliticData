@@ -62,6 +62,8 @@ def restore_official_elections():
     """
     source_file=BASE/'data'/'politicdata_sao_luis_2024_CORRIGIDO.csv'
     if not source_file.is_file():
+        source_file=BASE.parent/'data'/'politicdata_sao_luis_2024_CORRIGIDO.csv'
+    if not source_file.is_file():
         print('Base oficial ainda não disponível no pacote: '+str(source_file),flush=True)
         return
     with connect() as db:
