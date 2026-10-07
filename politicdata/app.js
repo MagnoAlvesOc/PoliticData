@@ -53,9 +53,9 @@ const BAIRROS_KEY='politicdata_bairros_geojson_v1';
 function loadBairrosGeojson(){
  try{const x=JSON.parse(localStorage.getItem(BAIRROS_KEY)||'null');return x?.type==='FeatureCollection'&&Array.isArray(x.features)?x:null}catch(e){return null}
 }
-function namesBairro(p){return String(p.NOME||p.nome||p.NM_BAIRRO||p.nm_bairro||p.bairro||p.BAIRRO||p.name||'Bairro sem identificação')}
+function namesBairro(p){return String(p.NOME||p.nome||p.NM_BAIRRO||p.nm_bairro||p.bairro||p.BAIRRO||p.name||(p.CD_SETOR?'Setor censitário '+p.CD_SETOR:'Área sem identificação'))}
 function initBairrosLayer(map){
- const box=document.createElement('div');box.className='card section';box.innerHTML='<h3>Limites e nomes dos bairros</h3><p class="muted mini">Importe um GeoJSON de polígonos de bairros de São Luís. Os contornos são aproximados conforme a fonte cartográfica; não representam zonas eleitorais.</p><label>Malha de bairros GeoJSON <input id="bairrosGeojson" type="file" accept=".geojson,.json,application/geo+json"></label><div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-top:10px"><label><input type="checkbox" id="bairrosVisible" checked> Mostrar contornos e nomes</label><button id="bairrosClear" class="outline" type="button">Remover malha</button></div><div id="bairrosStatus" class="muted mini" role="status"></div>';
+ const box=document.createElement('div');box.className='card section';box.innerHTML='<h3>Limites geográficos</h3><p class="muted mini">Importe polígonos GeoJSON de bairros ou setores censitários. Setores IBGE não são bairros, zonas nem seções eleitorais.</p><label>Malha geográfica GeoJSON <input id="bairrosGeojson" type="file" accept=".geojson,.json,application/geo+json"></label><div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-top:10px"><label><input type="checkbox" id="bairrosVisible" checked> Mostrar contornos e nomes</label><button id="bairrosClear" class="outline" type="button">Remover malha</button></div><div id="bairrosStatus" class="muted mini" role="status"></div>';
  document.querySelector('#map').parentElement.insertAdjacentElement('beforebegin',box);
  let layer=null;
  const msg=document.querySelector('#bairrosStatus');
@@ -70,7 +70,7 @@ function initBairrosLayer(map){
      onEachFeature:(f,l)=>{
        const name=namesBairro(f.properties||{});
        l.bindPopup(document.createElement('strong').appendChild(document.createTextNode(name)).parentNode);
-       if(l.getBounds){
+       if(l.getBounds&&!f.properties?.CD_SETOR){
          const point=l.getBounds().getCenter();
          const label=L.marker(point,{interactive:false,icon:L.divIcon({className:'bairro-label',html:'<span>'+esc(name)+'</span>',iconSize:[130,20],iconAnchor:[65,10]})});
          labels.push(label);
@@ -79,7 +79,7 @@ function initBairrosLayer(map){
    });
    const labelsLayer=L.layerGroup(labels);layer.addTo(map); if(document.querySelector('#bairrosVisible').checked)labelsLayer.addTo(map);
    layer._labels=labelsLayer;
-   msg.textContent=valid.length+' polígonos carregados. Fonte e data dependem do arquivo fornecido.';
+   msg.textContent=valid.length+' polígonos carregados ('+(valid[0]?.properties?.CD_SETOR?'setores censitários IBGE; não são limites de bairros':'malha territorial')+').';
  }
  let labels=[];
  const originalDraw=draw;
