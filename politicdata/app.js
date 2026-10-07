@@ -150,19 +150,36 @@ async function mapPage(){await getElectionData();$('#content').innerHTML=`<div c
 
 async function territoryPage(){let data=await api('leader-summary');$('#content').innerHTML=`<div class="notice">Distribuição administrativa de lideranças por bairro. Não representa intenção de voto, número de eleitores ou projeção eleitoral.</div><div class="cards"><div class="card kpi"><span>Lideranças registradas</span><strong>${fmt(data.reduce((s,x)=>s+Number(x.total),0))}</strong></div><div class="card kpi"><span>Bairros informados</span><strong>${fmt(data.filter(x=>x.neighborhood!=='Não informado').length)}</strong></div></div><div class="card section"><h3>Quantidade de lideranças por bairro</h3>${bars(data.map(x=>[x.neighborhood,Number(x.total)]))}</div><div class="card section"><h3>Tabela de distribuição</h3>${table(['Bairro','Quantidade'],data.map(x=>`<tr><td>${esc(x.neighborhood)}</td><td>${fmt(x.total)}</td></tr>`))}</div>`}
 function normalizeColumn(key){return String(key||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim().replace(/[_-]/g,' ')}
+function csvRows(raw){
+ const first=raw.split(/\r?\n/,1)[0];
+ const delim=(first.match(/;/g)||[]).length>(first.match(/,/g)||[]).length?';':',';
+ let rows=[],row=[],cell='',quoted=false;
+ for(let i=0;i<raw.length;i++){
+  const ch=raw[i];
+  if(ch==='"'){if(quoted&&raw[i+1]==='"'){cell+='"';i++}else quoted=!quoted}
+  else if(!quoted&&ch===delim){row.push(cell);cell=''}
+  else if(!quoted&&(ch==='\n'||ch==='\r')){if(ch==='\r'&&raw[i+1]==='\n')i++;row.push(cell);if(row.some(x=>x.trim()))rows.push(row);row=[];cell=''}
+  else cell+=ch;
+ }
+ row.push(cell);if(row.some(x=>x.trim()))rows.push(row);
+ const keys=(rows.shift()||[]).map(x=>x.trim());
+ return rows.map(a=>Object.fromEntries(keys.map((k,i)=>[k,a[i]||''])));
+}
 async function readSpreadsheet(file){
- if(/\.xlsx?$/i.test(file.name)){
-   if(typeof XLSX==='undefined')throw Error('Biblioteca Excel indisponível. Use CSV ou recarregue a página.');
-   const book=XLSX.read(await file.arrayBuffer(),{type:'array',raw:false});
-   return XLSX.utils.sheet_to_json(book.Sheets[book.SheetNames[0]],{defval:'',raw:false});
- }
- const raw=await file.text();
- const delimiter=(raw.split('\n')[0].match(/;/g)||[]).length>(raw.split('\n')[0].match(/,/g)||[]).length?';':',';
- if(typeof XLSX!=='undefined'){
-   const book=XLSX.read(raw,{type:'string',FS:delimiter,raw:false});
-   return XLSX.utils.sheet_to_json(book.Sheets[book.SheetNames[0]],{defval:'',raw:false});
- }
- throw Error('Biblioteca de planilhas não carregada');
+ if(!/\.xlsx$/i.test(file.name))return csvRows(await file.text());
+ const buffer=await file.arrayBuffer();
+ if(buffer.byteLength>3000000)throw Error('Excel acima de 3 MB');
+ const bytes=new Uint8Array(buffer);
+ let binary='';
+ for(let i=0;i<bytes.length;i+=16384)binary+=String.fromCharCode(...bytes.subarray(i,i+16384));
+ const data=await api('spreadsheet/read','POST',{base64:btoa(binary)});
+ return data.rows||[];
+}
+function toCSV(rows){
+ if(!rows.length)throw Error('Planilha vazia');
+ const keys=[...new Set(rows.flatMap(r=>Object.keys(r)))];
+ const cell=x=>'"'+String(x??'').replace(/"/g,'""')+'"';
+ return [keys.map(cell).join(','),...rows.map(r=>keys.map(k=>cell(r[k])).join(','))].join('\n');
 }
 function transformRows(rows){
  const aliases={nome:'name',name:'name',telefone:'phone',celular:'phone',phone:'phone',bairro:'neighborhood',neighborhood:'neighborhood',observacoes:'notes',observacao:'notes',notes:'notes','id lideranca':'leader_id','lideranca id':'leader_id',leader_id:'leader_id'};
@@ -192,8 +209,8 @@ async function contactPage(){
   }catch(e){$('#contactImportResult').textContent='Falha: '+e.message}
  };
 }
-function importLeadersUI(){return `<div class="card section"><h3>Importar lideranças administrativas (CSV)</h3><p>Crie uma cópia da planilha contendo somente: <code>Nome, Apelido, Telefone, Bairro, Região, Zona, Seção, Endereço, Atuação, Observações</code>. Não inclua dados de eleitores, CPF, nome da mãe nem campos de votos previstos/fixos. Informe endereço da liderança somente quando necessário para sua gestão administrativa.</p><p>O importador aceita CSV separado por vírgula ou ponto e vírgula, com cabeçalhos em português. Registros com o mesmo nome e bairro são ignorados.</p><label>Arquivo CSV<input id="leadersCSV" type="file" accept=".csv,text/csv"></label><p><button class="primary" id="uploadLeaders">Importar lideranças</button></p><div id="leaderImportResult" role="status"></div></div>`}
-function importPage(){$('#content').innerHTML=importLeadersUI()+`<div class="notice">Importe um CSV previamente preparado a partir de dados oficiais. O aplicativo não baixa nem geocodifica automaticamente dados do TSE nesta versão. Os campos latitude e longitude são opcionais, mas necessários para mostrar pontos no mapa.</div><div class="card"><h3>Importar arquivo CSV</h3><p>Colunas obrigatórias: <code>election_year,round,office,municipality,zone,section,candidate,votes,source</code>.</p><p>Opcionais: <code>neighborhood,polling_place,eligible,turnout,latitude,longitude</code>.</p><p class="muted mini">Máximo de 15.000 linhas por importação e até 5 MB de conteúdo. Codificação UTF-8 e separador vírgula.</p><label>Arquivo CSV<input id="csvFile" type="file" accept=".csv,text/csv"></label><p><button class="primary" id="upload">Validar e importar</button></p><div id="importResult"></div></div><div class="card section"><h3>Modelo de CSV</h3><pre style="white-space:pre-wrap;word-break:break-word">election_year,round,office,municipality,neighborhood,zone,section,polling_place,candidate,votes,source,latitude,longitude\n2024,1,Vereador,Municipio Exemplo,Bairro Exemplo,001,0001,Escola Exemplo,Candidato Exemplo,100,TSE (exemplo),-2.53,-44.30</pre><p class="muted mini">A linha é fictícia: serve somente para demonstrar o formato e não deve ser usada em relatórios reais.</p></div>`;$('#uploadLeaders').onclick=async()=>{let file=$('#leadersCSV').files[0];if(!file)return alert('Selecione o CSV de lideranças');try{let result=await api('leaders/import','POST',{csv:await file.text()});$('#leaderImportResult').textContent=`${result.imported} lideranças importadas; ${result.skipped} ignoradas.`;await loadLeaders()}catch(e){$('#leaderImportResult').textContent='Falha: '+e.message}};$('#upload').onclick=async()=>{let file=$('#csvFile').files[0];if(!file)return alert('Selecione um CSV');try{let result=await api('elections/import','POST',{csv:await file.text()});$('#importResult').textContent=`${result.imported} linhas importadas com sucesso.`}catch(e){$('#importResult').textContent='Falha: '+e.message}}}
+function importLeadersUI(){return `<div class="card section"><h3>Importar lideranças (Excel ou CSV)</h3><p>Crie uma cópia da planilha contendo somente: <code>Nome, Apelido, Telefone, Bairro, Região, Zona, Seção, Endereço, Atuação, Observações</code>. Não inclua dados de eleitores, CPF, nome da mãe nem campos de votos previstos/fixos. Informe endereço da liderança somente quando necessário para sua gestão administrativa.</p><p>O importador aceita CSV separado por vírgula ou ponto e vírgula, com cabeçalhos em português. Registros com o mesmo nome e bairro são ignorados.</p><label>Arquivo Excel ou CSV<input id="leadersCSV" type="file" accept=".xlsx,.csv,text/csv"></label><p><button class="primary" id="uploadLeaders">Importar lideranças</button></p><div id="leaderImportResult" role="status"></div></div>`}
+function importPage(){$('#content').innerHTML=importLeadersUI()+`<div class="notice">Importe um CSV previamente preparado a partir de dados oficiais. O aplicativo não baixa nem geocodifica automaticamente dados do TSE nesta versão. Os campos latitude e longitude são opcionais, mas necessários para mostrar pontos no mapa.</div><div class="card"><h3>Importar arquivo CSV</h3><p>Colunas obrigatórias: <code>election_year,round,office,municipality,zone,section,candidate,votes,source</code>.</p><p>Opcionais: <code>neighborhood,polling_place,eligible,turnout,latitude,longitude</code>.</p><p class="muted mini">Máximo de 15.000 linhas por importação e até 5 MB de conteúdo. Codificação UTF-8 e separador vírgula.</p><label>Arquivo CSV<input id="csvFile" type="file" accept=".csv,text/csv"></label><p><button class="primary" id="upload">Validar e importar</button></p><div id="importResult"></div></div><div class="card section"><h3>Modelo de CSV</h3><pre style="white-space:pre-wrap;word-break:break-word">election_year,round,office,municipality,neighborhood,zone,section,polling_place,candidate,votes,source,latitude,longitude\n2024,1,Vereador,Municipio Exemplo,Bairro Exemplo,001,0001,Escola Exemplo,Candidato Exemplo,100,TSE (exemplo),-2.53,-44.30</pre><p class="muted mini">A linha é fictícia: serve somente para demonstrar o formato e não deve ser usada em relatórios reais.</p></div>`;$('#uploadLeaders').onclick=async()=>{let file=$('#leadersCSV').files[0];if(!file)return alert('Selecione o CSV de lideranças');try{let result=await api('leaders/import','POST',{csv:toCSV(await readSpreadsheet(file))});$('#leaderImportResult').textContent=`${result.imported} lideranças importadas; ${result.skipped} ignoradas.`;await loadLeaders()}catch(e){$('#leaderImportResult').textContent='Falha: '+e.message}};$('#upload').onclick=async()=>{let file=$('#csvFile').files[0];if(!file)return alert('Selecione um CSV');try{let result=await api('elections/import','POST',{csv:await file.text()});$('#importResult').textContent=`${result.imported} linhas importadas com sucesso.`}catch(e){$('#importResult').textContent='Falha: '+e.message}}}
 $('#loginForm').onsubmit=async e=>{e.preventDefault();try{let b=Object.fromEntries(new FormData(e.target));let x=await api('login','POST',b);csrf=x.csrf;$('#auth').hidden=true;$('#app').hidden=false;$('#user').textContent=b.username;await navigate('dashboard')}catch(ex){$('#loginError').textContent=ex.message}};
 $('#logout').onclick=async()=>{await api('logout','POST',{});location.reload()};document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>navigate(b.dataset.page));
 (async()=>{try{let x=await api('session');if(x.logged_in){csrf=x.csrf;$('#auth').hidden=true;$('#app').hidden=false;$('#user').textContent=x.username;await navigate('dashboard')}}catch(e){console.error(e)}})();
