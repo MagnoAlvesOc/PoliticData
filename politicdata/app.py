@@ -1,7 +1,8 @@
 """PoliticData: local leadership and public aggregate electoral reporting tool.
 Runs with Python 3.10+ standard library only. Localhost by default.
 """
-import csv, hashlib, hmac, io, json, os, secrets, sqlite3, time
+import csv, hashlib, hmac, io, json, os, secrets, sqlite3, time, base64, zipfile
+import xml.etree.ElementTree as ET
 from datetime import date, datetime
 from http import HTTPStatus
 from http.cookies import SimpleCookie
@@ -104,6 +105,50 @@ def restore_official_elections():
                      nullable_int('eligible'),nullable_int('turnout'),nullable_float('latitude'),nullable_float('longitude'),x['source']))
                 imported+=1
         print('Base histórica oficial restaurada: '+str(imported)+' linhas',flush=True)
+
+
+def parse_excel_base64(data):
+    """Lê primeira planilha .xlsx pelo formato Office Open XML, sem dependências."""
+    raw=base64.b64decode(data,validate=True)
+    if len(raw)>3_000_000:raise ValueError('Arquivo Excel acima de 3 MB')
+    ns={'m':'http://schemas.openxmlformats.org/spreadsheetml/2006/main'}
+    with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+        names=set(archive.namelist())
+        worksheet='xl/worksheets/sheet1.xml'
+        if worksheet not in names:raise ValueError('Planilha 1 não encontrada')
+        target=[worksheet]+(['xl/sharedStrings.xml'] if 'xl/sharedStrings.xml' in names else [])
+        if any(archive.getinfo(n).file_size>15_000_000 for n in target):
+            raise ValueError('Planilha descompactada muito grande')
+        strings=[]
+        if 'xl/sharedStrings.xml' in names:
+            root=ET.fromstring(archive.read('xl/sharedStrings.xml'))
+            for si in root.findall('m:si',ns):
+                strings.append(''.join((t.text or '') for t in si.findall('.//m:t',ns)))
+        sheet=ET.fromstring(archive.read(worksheet))
+        values=[]
+        for row in sheet.findall('.//m:sheetData/m:row',ns):
+            d={}
+            for cell in row.findall('m:c',ns):
+                ref=cell.attrib.get('r','')
+                col=''.join(x for x in ref if x.isalpha())
+                index=0
+                for ch in col:index=index*26+(ord(ch.upper())-64)
+                index-=1
+                if index<0 or index>150:continue
+                typ=cell.attrib.get('t')
+                v=cell.find('m:v',ns)
+                if typ=='inlineStr':
+                    text=''.join(x.text or '' for x in cell.findall('.//m:t',ns))
+                else:
+                    text=v.text if v is not None and v.text is not None else ''
+                    if typ=='s' and text:
+                        num=int(text);text=strings[num] if num<len(strings) else ''
+                d[index]=text
+            if d:values.append(d)
+            if len(values)>10005:raise ValueError('Máximo de 10.000 linhas')
+        if not values:return []
+        keys=[str(values[0].get(j,'')).strip() for j in range(max(values[0])+1)]
+        return [{key:str(row.get(j,'')).strip() for j,key in enumerate(keys) if key} for row in values[1:]]
 
 def rows(db,sql,args=()): return [dict(x) for x in db.execute(sql,args).fetchall()]
 def check_password(p,salt,expected): return hmac.compare_digest(hashlib.pbkdf2_hmac('sha256',p.encode(),bytes.fromhex(salt),260000).hex(),expected)
@@ -216,6 +261,8 @@ class Handler(BaseHTTPRequestHandler):
                 if token:SESSIONS.pop(token.value,None)
                 return self.send(200,{'ok':True},extra=[('Set-Cookie','pd_session=; HttpOnly; SameSite=Strict; Secure; Path=/; Max-Age=0')])
             b=self.body()
+            if path=='/api/spreadsheet/read':
+                return self.send(200,{'rows':parse_excel_base64(b.get('base64',''))})
             with connect() as db:
                 if path=='/api/leaders/import':
                     raw=b.get('csv','')
