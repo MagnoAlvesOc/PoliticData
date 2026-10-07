@@ -303,6 +303,16 @@ class Handler(BaseHTTPRequestHandler):
                     lid=int(b['id'])
                     cur=db.execute("UPDATE leaders SET archived=1 WHERE id=? AND archived=0",(lid,))
                     if not cur.rowcount:raise ValueError('Liderança não encontrada')
+                elif path=='/api/contacts/update':
+                    cid=int(b['id'])
+                    name=clean(b.get('name'),150)
+                    if not name:raise ValueError('Nome obrigatório')
+                    lid=int(b['leader_id']) if str(b.get('leader_id') or '').strip() else None
+                    if lid and not db.execute('SELECT id FROM leaders WHERE id=? AND archived=0',(lid,)).fetchone():
+                        raise ValueError('Liderança não encontrada')
+                    cur=db.execute('UPDATE contacts SET name=?,phone=?,neighborhood=?,notes=?,leader_id=? WHERE id=?',
+                        (name,clean(b.get('phone'),70),clean(b.get('neighborhood'),120),clean(b.get('notes'),500),lid,cid))
+                    if not cur.rowcount:raise ValueError('Contato não encontrado')
                 elif path=='/api/contacts':
                     name=clean(b.get('name'),150)
                     if not name:raise ValueError('Nome obrigatório')
