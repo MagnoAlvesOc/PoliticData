@@ -62,6 +62,8 @@ def restore_official_elections():
     """
     source_file=BASE/'data'/'politicdata_sao_luis_2024_CORRIGIDO.csv'
     if not source_file.is_file():
+        source_file=BASE.parent/'data'/'politicdata_sao_luis_2024_CORRIGIDO.csv'
+    if not source_file.is_file():
         print('Base oficial ainda não disponível no pacote: '+str(source_file),flush=True)
         return
     with connect() as db:
@@ -140,6 +142,14 @@ class Handler(BaseHTTPRequestHandler):
         if path=='/': return self.send(200,(BASE/'index.html').read_bytes(),'text/html')
         if path=='/app.js':return self.send(200,(BASE/'app.js').read_bytes(),'text/javascript')
         if path=='/style.css':return self.send(200,(BASE/'style.css').read_bytes(),'text/css')
+        if path=='/setores-ibge.geojson':
+            candidates=[BASE/'data'/'Setores_Censitarios_Sao_Luis_IBGE_2022.geojson',
+                        BASE.parent/'data'/'Setores_Censitarios_Sao_Luis_IBGE_2022.geojson']
+            for candidate in candidates:
+                if candidate.is_file():
+                    return self.send(200,candidate.read_bytes(),'application/geo+json')
+            return self.send(404,{'error':'Malha IBGE ainda não foi adicionada ao repositório'})
+
         if path=='/api/session':
             s=self.current();return self.send(200,{'logged_in':bool(s),'username':s['username'] if s else None,'csrf':s['csrf'] if s else None})
         if not self.current():return self.send(401,{'error':'Autenticação necessária'})

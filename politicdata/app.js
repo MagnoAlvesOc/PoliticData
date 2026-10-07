@@ -53,9 +53,9 @@ const BAIRROS_KEY='politicdata_bairros_geojson_v1';
 function loadBairrosGeojson(){
  try{const x=JSON.parse(localStorage.getItem(BAIRROS_KEY)||'null');return x?.type==='FeatureCollection'&&Array.isArray(x.features)?x:null}catch(e){return null}
 }
-function namesBairro(p){return String(p.NOME||p.nome||p.NM_BAIRRO||p.nm_bairro||p.bairro||p.BAIRRO||p.name||'Bairro sem identificação')}
+function namesBairro(p){return String(p.NOME||p.nome||p.NM_BAIRRO||p.nm_bairro||p.bairro||p.BAIRRO||p.name||(p.CD_SETOR?'Setor censitário '+p.CD_SETOR:'Área sem identificação'))}
 function initBairrosLayer(map){
- const box=document.createElement('div');box.className='card section';box.innerHTML='<h3>Limites e nomes dos bairros</h3><p class="muted mini">Importe um GeoJSON de polígonos de bairros de São Luís. Os contornos são aproximados conforme a fonte cartográfica; não representam zonas eleitorais.</p><label>Malha de bairros GeoJSON <input id="bairrosGeojson" type="file" accept=".geojson,.json,application/geo+json"></label><div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-top:10px"><label><input type="checkbox" id="bairrosVisible" checked> Mostrar contornos e nomes</label><button id="bairrosClear" class="outline" type="button">Remover malha</button></div><div id="bairrosStatus" class="muted mini" role="status"></div>';
+ const box=document.createElement('div');box.className='card section';box.innerHTML='<h3>Limites geográficos</h3><p class="muted mini">Importe polígonos GeoJSON de bairros ou setores censitários. Setores IBGE não são bairros, zonas nem seções eleitorais.</p><label>Malha geográfica GeoJSON <input id="bairrosGeojson" type="file" accept=".geojson,.json,application/geo+json"></label><div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-top:10px"><label><input type="checkbox" id="bairrosVisible" checked> Mostrar contornos e nomes</label><button id="bairrosClear" class="outline" type="button">Remover malha</button></div><div id="bairrosStatus" class="muted mini" role="status"></div>';
  document.querySelector('#map').parentElement.insertAdjacentElement('beforebegin',box);
  let layer=null;
  const msg=document.querySelector('#bairrosStatus');
@@ -70,7 +70,7 @@ function initBairrosLayer(map){
      onEachFeature:(f,l)=>{
        const name=namesBairro(f.properties||{});
        l.bindPopup(document.createElement('strong').appendChild(document.createTextNode(name)).parentNode);
-       if(l.getBounds){
+       if(l.getBounds&&!f.properties?.CD_SETOR){
          const point=l.getBounds().getCenter();
          const label=L.marker(point,{interactive:false,icon:L.divIcon({className:'bairro-label',html:'<span>'+esc(name)+'</span>',iconSize:[130,20],iconAnchor:[65,10]})});
          labels.push(label);
@@ -79,7 +79,7 @@ function initBairrosLayer(map){
    });
    const labelsLayer=L.layerGroup(labels);layer.addTo(map); if(document.querySelector('#bairrosVisible').checked)labelsLayer.addTo(map);
    layer._labels=labelsLayer;
-   msg.textContent=valid.length+' polígonos carregados. Fonte e data dependem do arquivo fornecido.';
+   msg.textContent=valid.length+' polígonos carregados ('+(valid[0]?.properties?.CD_SETOR?'setores censitários IBGE; não são limites de bairros':'malha territorial')+').';
  }
  let labels=[];
  const originalDraw=draw;
@@ -96,6 +96,17 @@ function initBairrosLayer(map){
    }catch(err){msg.textContent='Não foi possível carregar: '+err.message}
  };
  draw();
+ fetch('/setores-ibge.geojson',{cache:'no-cache'}).then(async response=>{
+   if(!response.ok)return null;
+   const data=await response.json();
+   if(data?.type!=='FeatureCollection'||!Array.isArray(data.features))return null;
+   return data;
+ }).then(data=>{
+   if(!data)return;
+   try{localStorage.setItem(BAIRROS_KEY,JSON.stringify(data))}catch(e){}
+   draw();
+   msg.textContent+=' · Carregada automaticamente do repositório.';
+ }).catch(err=>{console.warn('Malha oficial indisponível',err)});
 }
 async function mapPage(){await getElectionData();$('#content').innerHTML=`<div class="notice">O mapa usa apenas coordenadas que você incluiu no CSV de resultados públicos. A intensidade representa a soma de votos históricos dos registros selecionados, não votos futuros.</div><div class="card"><h3>Filtro territorial</h3>${filterUI()}</div><div class="card section"><div id="map"></div><p class="muted mini">Mapa de intensidade dos resultados agregados por local de votação. Requer internet para carregar os mapas do OpenStreetMap e a biblioteca Leaflet.</p></div><div id="mapStats" class="section"></div>`;if(typeof L==='undefined'){$('#map').innerHTML='Biblioteca de mapas indisponível. Verifique sua conexão.';return}mapInstance=L.map('map').setView([-2.53,-44.30],11);L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{attribution:'© OpenStreetMap contributors',maxZoom:19}).addTo(mapInstance);let layer=L.layerGroup().addTo(mapInstance);initBairrosLayer(mapInstance);function draw(){layer.clearLayers();let data=filteredElection();let points=new Map;data.forEach(x=>{if(x.latitude===null||x.longitude===null)return;let lat=Number(x.latitude),lon=Number(x.longitude);if(!Number.isFinite(lat)||!Number.isFinite(lon))return;let key=lat.toFixed(5)+';'+lon.toFixed(5);let obj=points.get(key)||{lat,lon,votes:0,names:new Set};obj.votes+=Number(x.votes);obj.names.add(x.polling_place||x.municipality);points.set(key,obj)});let vals=[...points.values()],max=Math.max(1,...vals.map(x=>x.votes));vals.forEach(x=>{let scale=x.votes/max;L.circleMarker([x.lat,x.lon],{radius:7+20*Math.sqrt(scale),fillColor:scale>.65?'#b91c1c':scale>.3?'#ea580c':'#f59e0b',color:'#fff',weight:1,fillOpacity:.25+.55*scale}).bindPopup(`<b>${esc([...x.names].join(', '))}</b><br>Votos históricos: ${fmt(x.votes)}`).addTo(layer)});if(vals.length)mapInstance.fitBounds(L.latLngBounds(vals.map(x=>[x.lat,x.lon])).pad(.25));$('#mapStats').innerHTML=`<div class="card"><b>${fmt(vals.length)}</b> locais georreferenciados · <b>${fmt(data.reduce((s,x)=>s+Number(x.votes),0))}</b> votos históricos no filtro</div>`}document.querySelectorAll('.filters select').forEach(s=>s.addEventListener('change',draw));draw();setTimeout(()=>mapInstance.invalidateSize(),200)}
 
