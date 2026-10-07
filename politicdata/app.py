@@ -56,6 +56,46 @@ def init():
             hashed=hashlib.pbkdf2_hmac('sha256',password.encode(),bytes.fromhex(salt),260000).hex()
             db.execute('INSERT INTO users(username,password_hash,salt) VALUES(?,?,?)',(user,hashed,salt))
 
+def restore_official_elections():
+    """Restaurar base pública oficial a partir do CSV versionado no repositório.
+    Faz upsert idempotente; jamais elimina cadastros ou dados administrativos.
+    """
+    source_file=BASE/'data'/'politicdata_sao_luis_2024_CORRIGIDO.csv'
+    if not source_file.is_file():
+        print('Base oficial ainda não disponível no pacote: '+str(source_file),flush=True)
+        return
+    with connect() as db:
+        present=db.execute("SELECT count(*) FROM elections WHERE election_year=2024 AND municipality='São Luís' AND candidate='TOTAL VOTOS NOMINAIS - VEREADOR'").fetchone()[0]
+        if present>=2173:
+            print('Base TSE São Luís 2024 já cadastrada: '+str(present)+' registros',flush=True)
+            return
+        imported=0
+        with source_file.open('r',encoding='utf-8-sig',newline='') as f:
+            reader=csv.DictReader(f)
+            expected={'election_year','round','office','municipality','zone','section','candidate','votes','source'}
+            if not expected.issubset(set(reader.fieldnames or [])):
+                raise ValueError('CSV TSE empacotado possui colunas inválidas')
+            for x in reader:
+                if x.get('municipality')!='São Luís' or str(x.get('election_year'))!='2024':
+                    continue
+                def nullable_int(key):
+                    val=str(x.get(key) or '').strip()
+                    return int(val) if val else None
+                def nullable_float(key):
+                    val=str(x.get(key) or '').strip()
+                    return float(val) if val else None
+                db.execute("""INSERT INTO elections(election_year,round,office,municipality,neighborhood,zone,section,polling_place,candidate,votes,eligible,turnout,latitude,longitude,source)
+                    VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    ON CONFLICT(election_year,round,office,municipality,zone,section,candidate)
+                    DO UPDATE SET neighborhood=excluded.neighborhood,polling_place=excluded.polling_place,
+                    votes=excluded.votes,eligible=excluded.eligible,turnout=excluded.turnout,
+                    latitude=excluded.latitude,longitude=excluded.longitude,source=excluded.source""",
+                    (2024,int(x.get('round') or 1),x['office'],x['municipality'],x.get('neighborhood',''),
+                     x['zone'],x['section'],x.get('polling_place',''),x['candidate'],int(x['votes']),
+                     nullable_int('eligible'),nullable_int('turnout'),nullable_float('latitude'),nullable_float('longitude'),x['source']))
+                imported+=1
+        print('Base histórica oficial restaurada: '+str(imported)+' linhas',flush=True)
+
 def rows(db,sql,args=()): return [dict(x) for x in db.execute(sql,args).fetchall()]
 def check_password(p,salt,expected): return hmac.compare_digest(hashlib.pbkdf2_hmac('sha256',p.encode(),bytes.fromhex(salt),260000).hex(),expected)
 def clean(v,maxlen=4000): return str(v or '').strip()[:maxlen]
@@ -229,6 +269,7 @@ class Handler(BaseHTTPRequestHandler):
 
 def main():
     init()
+    restore_official_elections()
     host=os.environ.get('POLITICDATA_HOST','0.0.0.0' if os.environ.get('RENDER') else '127.0.0.1');port=int(os.environ.get('PORT',os.environ.get('POLITICDATA_PORT','8765')))
     print(f'PoliticData disponível em http://{host}:{port}',flush=True)
     ThreadingHTTPServer((host,port),Handler).serve_forever()
