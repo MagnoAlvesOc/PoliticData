@@ -42,7 +42,7 @@ def init():
         if 'review_status' not in expense_cols:
             db.execute("ALTER TABLE expenses ADD COLUMN review_status TEXT NOT NULL DEFAULT 'pendente'")
         leader_cols={r[1] for r in db.execute('PRAGMA table_info(leaders)')}
-        for col in ('nickname','activity'):
+        for col in ('nickname','activity','electoral_zone','electoral_section','address'):
             if col not in leader_cols:
                 db.execute(f'ALTER TABLE leaders ADD COLUMN {col} TEXT')
         count=db.execute('SELECT count(*) FROM users').fetchone()[0]
@@ -163,7 +163,7 @@ class Handler(BaseHTTPRequestHandler):
                     if not isinstance(raw,str) or len(raw)>4_000_000: raise ValueError('Arquivo CSV inválido ou muito grande')
                     dialect=csv.Sniffer().sniff(raw[:4096],delimiters=',;\t')
                     reader=csv.DictReader(io.StringIO(raw),dialect=dialect)
-                    aliases={'nome':'name','name':'name','apelido':'nickname','nickname':'nickname','telefone':'phone','phone':'phone','bairro':'neighborhood','neighborhood':'neighborhood','regiao':'region','região':'region','region':'region','atuacao':'activity','atuação':'activity','activity':'activity','observacoes':'notes','observações':'notes','notes':'notes'}
+                    aliases={'nome':'name','name':'name','apelido':'nickname','nickname':'nickname','telefone':'phone','phone':'phone','bairro':'neighborhood','neighborhood':'neighborhood','regiao':'region','região':'region','region':'region','atuacao':'activity','atuação':'activity','activity':'activity','zona':'electoral_zone','zona eleitoral':'electoral_zone','secao':'electoral_section','sessao':'electoral_section','seção':'electoral_section','endereco':'address','endereço':'address','observacoes':'notes','observações':'notes','notes':'notes'}
                     import unicodedata
                     def canonical(k):
                         k=unicodedata.normalize('NFKD',str(k or '').strip().lower())
@@ -171,7 +171,7 @@ class Handler(BaseHTTPRequestHandler):
                         return aliases.get(k)
                     fieldmap={k:canonical(k) for k in (reader.fieldnames or [])}
                     if 'name' not in fieldmap.values(): raise ValueError('É necessária uma coluna Nome')
-                    rejected={'cpf','nome da mae','mae','endereco','votos fixos','votos previstos','voto','eleitor','zona','sessao','secao','seção'}
+                    rejected={'cpf','nome da mae','mae','endereco','votos fixos','votos previstos','voto','eleitor'}
                     for k in (reader.fieldnames or []):
                         norm=unicodedata.normalize('NFKD',str(k).lower())
                         norm=''.join(c for c in norm if not unicodedata.combining(c)).strip()
@@ -183,13 +183,13 @@ class Handler(BaseHTTPRequestHandler):
                         if not rec.get('name'): skipped+=1;continue
                         exists=db.execute('SELECT 1 FROM leaders WHERE lower(trim(name))=lower(trim(?)) AND lower(trim(coalesce(neighborhood,'')))=lower(trim(?))',(rec['name'],rec.get('neighborhood',''))).fetchone()
                         if exists: skipped+=1;continue
-                        db.execute('INSERT INTO leaders(name,nickname,phone,region,neighborhood,activity,notes) VALUES(?,?,?,?,?,?,?)',tuple(rec.get(k,'') for k in ('name','nickname','phone','region','neighborhood','activity','notes')))
+                        db.execute('INSERT INTO leaders(name,nickname,phone,region,neighborhood,activity,notes,electoral_zone,electoral_section,address) VALUES(?,?,?,?,?,?,?,?,?,?)',tuple(rec.get(k,'') for k in ('name','nickname','phone','region','neighborhood','activity','notes','electoral_zone','electoral_section','address')))
                         imported+=1
                     return self.send(200,{'ok':True,'imported':imported,'skipped':skipped})
                 elif path=='/api/leaders':
                     name=clean(b.get('name'),150)
                     if not name:raise ValueError('Nome obrigatório')
-                    cur=db.execute('INSERT INTO leaders(name,nickname,phone,region,neighborhood,activity,notes) VALUES(?,?,?,?,?,?,?)',(name,clean(b.get('nickname'),100),clean(b.get('phone'),70),clean(b.get('region'),100),clean(b.get('neighborhood'),120),clean(b.get('activity'),120),clean(b.get('notes'))))
+                    cur=db.execute('INSERT INTO leaders(name,nickname,phone,region,neighborhood,activity,notes,electoral_zone,electoral_section,address) VALUES(?,?,?,?,?,?,?,?,?,?)',(name,clean(b.get('nickname'),100),clean(b.get('phone'),70),clean(b.get('region'),100),clean(b.get('neighborhood'),120),clean(b.get('activity'),120),clean(b.get('notes')),clean(b.get('electoral_zone'),20),clean(b.get('electoral_section'),20),clean(b.get('address'),250)))
                 elif path=='/api/meetings':
                     cur=db.execute('INSERT INTO meetings(leader_id,meeting_date,kind,summary,next_action) VALUES(?,?,?,?,?)',(int(b['leader_id']),date_ok(b['meeting_date']),clean(b.get('kind'),60) or 'reunião',clean(b['summary']),clean(b.get('next_action'))))
                 elif path=='/api/demands':
