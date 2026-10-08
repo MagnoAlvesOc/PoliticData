@@ -67,3 +67,9 @@ Para produção: HTTPS e proxy seguro, usuários e RBAC, logs imutáveis, backup
 - Importação de planilhas de eleitores identificáveis e votos pessoais não é permitida. Não há geocodificação automática.
 - Excel XLSX: no Excel, use Arquivo > Salvar Como > CSV UTF-8 e mantenha somente colunas administrativas necessárias.
 - A distribuição administrativa por bairro não é somada aos resultados eleitorais nem usada para inferir apoio.
+
+## Atualização 1.3 — diretório Eleitorado
+- O cadastro e a correção de eleitorado passam a ter CPF e nome da mãe, além dos campos existentes (nome completo, telefone/WhatsApp, endereço completo, bairro, zona e seção eleitoral, escolaridade, liderança vinculada e observações).
+- A importação de planilhas do Eleitorado aceita as colunas CPF e Nome da mãe, e a tabela do diretório exibe as duas colunas, com busca por CPF.
+- A importação de lideranças continua recusando CPF e nome da mãe.
+- CPF e nome da mãe são dados pessoais: trate-os como confidenciais, mantenha backup privado e avalie as bases legais da LGPD antes de uso real.

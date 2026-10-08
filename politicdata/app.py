@@ -60,7 +60,7 @@ def init():
             notes TEXT, leader_id INTEGER REFERENCES leaders(id) ON DELETE SET NULL,
             created_at TEXT DEFAULT CURRENT_TIMESTAMP)""")
         contact_cols={r[1] for r in db.execute('PRAGMA table_info(contacts)')}
-        for col in ('address','schooling','electoral_zone','electoral_section'):
+        for col in ('address','schooling','electoral_zone','electoral_section','cpf','mother_name'):
             if col not in contact_cols:
                 db.execute(f'ALTER TABLE contacts ADD COLUMN {col} TEXT')
         db.execute("CREATE INDEX IF NOT EXISTS idx_contacts_leader ON contacts(leader_id)")
@@ -351,15 +351,15 @@ class Handler(BaseHTTPRequestHandler):
                     lid=int(b['leader_id']) if str(b.get('leader_id') or '').strip() else None
                     if lid and not db.execute('SELECT id FROM leaders WHERE id=? AND archived=0',(lid,)).fetchone():
                         raise ValueError('Liderança não encontrada')
-                    cur=db.execute('UPDATE contacts SET name=?,phone=?,neighborhood=?,notes=?,leader_id=?,address=?,schooling=?,electoral_zone=?,electoral_section=? WHERE id=?',
-                        (name,clean(b.get('phone'),70),clean(b.get('neighborhood'),120),clean(b.get('notes'),500),lid,clean(b.get('address'),250),clean(b.get('schooling'),100),clean(b.get('electoral_zone'),20),clean(b.get('electoral_section'),20),cid))
+                    cur=db.execute('UPDATE contacts SET name=?,phone=?,neighborhood=?,notes=?,leader_id=?,address=?,schooling=?,electoral_zone=?,electoral_section=?,cpf=?,mother_name=? WHERE id=?',
+                        (name,clean(b.get('phone'),70),clean(b.get('neighborhood'),120),clean(b.get('notes'),500),lid,clean(b.get('address'),250),clean(b.get('schooling'),100),clean(b.get('electoral_zone'),20),clean(b.get('electoral_section'),20),clean(b.get('cpf'),20),clean(b.get('mother_name'),150),cid))
                     if not cur.rowcount:raise ValueError('Contato não encontrado')
                 elif path=='/api/contacts':
                     name=clean(b.get('name'),150)
                     if not name:raise ValueError('Nome obrigatório')
                     lid=int(b['leader_id']) if b.get('leader_id') else None
-                    cur=db.execute("INSERT INTO contacts(name,phone,neighborhood,notes,leader_id,address,schooling,electoral_zone,electoral_section) VALUES(?,?,?,?,?,?,?,?,?)",
-                        (name,clean(b.get('phone'),70),clean(b.get('neighborhood'),120),clean(b.get('notes'),500),lid,clean(b.get('address'),250),clean(b.get('schooling'),100),clean(b.get('electoral_zone'),20),clean(b.get('electoral_section'),20)))
+                    cur=db.execute("INSERT INTO contacts(name,phone,neighborhood,notes,leader_id,address,schooling,electoral_zone,electoral_section,cpf,mother_name) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                        (name,clean(b.get('phone'),70),clean(b.get('neighborhood'),120),clean(b.get('notes'),500),lid,clean(b.get('address'),250),clean(b.get('schooling'),100),clean(b.get('electoral_zone'),20),clean(b.get('electoral_section'),20),clean(b.get('cpf'),20),clean(b.get('mother_name'),150)))
                 elif path=='/api/contacts/import':
                     records=b.get('rows')
                     if not isinstance(records,list) or len(records)>1000:raise ValueError('Envie até 1.000 contatos por lote')
@@ -376,8 +376,8 @@ class Handler(BaseHTTPRequestHandler):
                         found=db.execute("""SELECT id FROM contacts WHERE lower(name)=lower(?) AND
                         coalesce(phone,'')=? AND coalesce(leader_id,0)=coalesce(?,0)""",(name,phone,lid)).fetchone()
                         if found:skipped+=1;continue
-                        db.execute("INSERT INTO contacts(name,phone,neighborhood,notes,leader_id) VALUES(?,?,?,?,?)",
-                            (name,phone,neighborhood,clean(rec.get('notes'),500),lid,clean(rec.get('address'),250),clean(rec.get('schooling'),100),clean(rec.get('electoral_zone'),20),clean(rec.get('electoral_section'),20)))
+                        db.execute("INSERT INTO contacts(name,phone,neighborhood,notes,leader_id,address,schooling,electoral_zone,electoral_section,cpf,mother_name) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                            (name,phone,neighborhood,clean(rec.get('notes'),500),lid,clean(rec.get('address'),250),clean(rec.get('schooling'),100),clean(rec.get('electoral_zone'),20),clean(rec.get('electoral_section'),20),clean(rec.get('cpf'),20),clean(rec.get('mother_name'),150)))
                         imported+=1
                     return self.send(200,{'imported':imported,'skipped':skipped})
                 elif path=='/api/leaders':
