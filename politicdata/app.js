@@ -97,7 +97,53 @@ function filteredElection(){
 }
 function filterUI(){return `<div class="filters">${[['election_year','Ano'],['candidate','Candidato'],['municipality','Município'],['zone','Zona'],['section','Seção'],['neighborhood','Bairro']].map(([key,label])=>`<label>${label}<select id="f_${key}"><option value="">Todos</option>${unique(elections.map(r=>String(r[key]??'')).filter(Boolean)).map(v=>`<option value="${esc(v)}">${esc(v)}</option>`).join('')}</select></label>`).join('')}</div>`}
 function electionStats(records){let votes=records.reduce((s,x)=>s+Number(x.votes),0);let groups={};records.forEach(x=>{let k=(x.municipality||'')+' · Zona '+(x.zone||'') ;groups[k]=(groups[k]||0)+Number(x.votes)});return `<div class="cards section"><div class="card kpi"><span>Votos históricos (seleção)</span><strong>${fmt(votes)}</strong></div><div class="card kpi"><span>Registros de seções</span><strong>${fmt(records.length)}</strong></div><div class="card kpi"><span>Municípios</span><strong>${fmt(unique(records.map(x=>x.municipality)).length)}</strong></div><div class="card kpi"><span>Zonas eleitorais</span><strong>${fmt(unique(records.map(x=>x.zone)).length)}</strong></div></div><div class="card section"><h3>Resultados por município e zona</h3>${bars(Object.entries(groups).sort((a,b)=>b[1]-a[1]).slice(0,25))}</div>`}
-async function electionPage(){await getElectionData();$('#content').innerHTML=`<div class="notice">Resultados históricos agregados conforme CSV importado. Filtros são independentes dos cadastros pessoais. O sistema não calcula votos prometidos ou garantidos.</div><div class="card"><h3>Filtros dos resultados</h3>${filterUI()}</div><div id="electionBody"></div>`;let refresh=()=>$('#electionBody').innerHTML=electionStats(filteredElection());document.querySelectorAll('.filters select').forEach(s=>s.addEventListener('change',refresh));refresh()}
+function historicAnalytics(records){
+ const sum=values=>values.reduce((a,b)=>a+(Number(b.votes)||0),0);
+ const aggregate=(key,arr=records)=>{
+  const groups=new Map();
+  for(const r of arr){const name=String(r[key]??'Não informado');groups.set(name,(groups.get(name)||0)+(Number(r.votes)||0))}
+  return [...groups.entries()].sort((a,b)=>Number(b[1])-Number(a[1]));
+ };
+ const historicTotals=records.filter(r=>/total votos nominais/i.test(String(r.candidate||'')));
+ const byYear=aggregate('election_year').sort((a,b)=>Number(a[0])-Number(b[0]));
+ const byZone=aggregate('zone');
+ const byPlace=aggregate('polling_place').filter(x=>x[0]!=='Não informado');
+ const bySection=aggregate('section').slice(0,30);
+ const formats=records.filter(r=>String(r.candidate||'').trim());
+ const candidateOptions=unique(formats.map(r=>r.candidate));
+ const candidateWarning=candidateOptions.some(v=>/total votos nominais/i.test(v))?
+  '<p class="muted mini">Atenção: “TOTAL VOTOS NOMINAIS” representa votos de todos os candidatos registrados nessa agregação, não os votos de um candidato específico. Para análises individuais, é necessário importar resultados oficiais por candidato.</p>':'';
+ const average=records.length?sum(records)/records.length:0;
+ return `<div class="section"><div class="card"><h3>Análise histórica dos resultados oficiais</h3>
+  <p class="muted mini">Estatísticas descritivas dos registros filtrados. Sem estimativas de votos futuros, sem cruzamentos com cadastros pessoais.</p>
+  <div class="cards">
+   <div class="card kpi"><span>Votos registrados</span><strong>${fmt(sum(records))}</strong></div>
+   <div class="card kpi"><span>Registros</span><strong>${fmt(records.length)}</strong></div>
+   <div class="card kpi"><span>Média por registro</span><strong>${average.toLocaleString('pt-BR',{maximumFractionDigits:1})}</strong></div>
+   <div class="card kpi"><span>Locais informados</span><strong>${fmt(unique(records.map(r=>r.polling_place).filter(Boolean)).length)}</strong></div>
+  </div>${candidateWarning}
+  ${!records.length?'<p>Nenhum resultado disponível para os filtros selecionados.</p>':''}
+ </div>
+ <div class="twocol section">
+  <div class="card"><h3>Votos registrados por eleição</h3>${bars(byYear,fmt)}</div>
+  <div class="card"><h3>Distribuição por zona eleitoral</h3>${bars(byZone.slice(0,30),fmt)}</div>
+ </div>
+ <div class="twocol section">
+  <div class="card"><h3>Locais de votação nos registros</h3>${bars(byPlace.slice(0,20),fmt)}</div>
+  <div class="card"><h3>Distribuição por seção</h3>${bars(bySection,fmt)}</div>
+ </div>
+ <div class="card section"><div class="toolbar"><h3>Resumo por zona para conferência</h3><button id="downloadHistoricCSV" class="outline" type="button">Exportar tabela CSV</button></div>
+ ${table(['Zona','Votos nos registros','Percentual do conjunto filtrado'],byZone.map(([zone,votes])=>`<tr><td>${esc(zone)}</td><td>${fmt(votes)}</td><td>${sum(records)?(100*votes/sum(records)).toLocaleString('pt-BR',{maximumFractionDigits:2}):'0'}%</td></tr>`))}
+ </div></div>`;
+}
+function exportHistoricZones(records){
+ const groups=new Map();
+ records.forEach(r=>{const zone=String(r.zone??'');groups.set(zone,(groups.get(zone)||0)+(Number(r.votes)||0))});
+ const csv='Zona;Votos históricos\n'+[...groups.entries()].sort((a,b)=>a[0].localeCompare(b[0],'pt-BR',{numeric:true})).map(([a,b])=>'"'+a.replace(/"/g,'""')+'";'+b).join('\n');
+ const blob=new Blob(['\ufeff'+csv],{type:'text/csv;charset=utf-8'});
+ const url=URL.createObjectURL(blob);const link=document.createElement('a');link.href=url;link.download='politicdata_resultados_historicos_por_zona.csv';link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+}
+async function electionPage(){await getElectionData();$('#content').innerHTML=`<div class="notice">Resultados históricos agregados conforme CSV importado. Filtros são independentes dos cadastros pessoais. O sistema não calcula votos prometidos ou garantidos.</div><div class="card"><h3>Filtros dos resultados</h3>${filterUI()}</div><div id="electionBody"></div>`;let refresh=()=>{$('#electionBody').innerHTML=electionStats(filteredElection())+historicAnalytics(filteredElection());const btn=$('#downloadHistoricCSV');if(btn)btn.onclick=()=>exportHistoricZones(filteredElection())};document.querySelectorAll('.filters select').forEach(s=>s.addEventListener('change',refresh));refresh()}
 const BAIRROS_KEY='politicdata_bairros_geojson_v1';
 function loadBairrosGeojson(){
  try{const x=JSON.parse(localStorage.getItem(BAIRROS_KEY)||'null');return x?.type==='FeatureCollection'&&Array.isArray(x.features)?x:null}catch(e){return null}
