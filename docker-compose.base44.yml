@@ -1,0 +1,52 @@
+# Base44 development environment for PoliticData.
+#
+# Runs the app straight from the cloned source (Python standard library only, no
+# build step). Edits to politicdata/*.py are picked up by restarting the service;
+# index.html / app.js / style.css are read from disk on every request, so frontend
+# edits are live without any restart.
+#
+# Usage: docker compose -f docker-compose.base44.yml up -d --build
+services:
+  app:
+    image: python:3.12-slim
+    working_dir: /app/politicdata
+    command: ["sh", "-ec", "exec python app.py"]
+    volumes:
+      # Source from the checkout, so edits are reflected immediately.
+      - ./:/app
+      # SQLite database kept outside the repo (survives restarts, never committed).
+      - politicdata-data:/data
+    environment:
+      - POLITICDATA_HOST=0.0.0.0
+      - POLITICDATA_PORT=8765
+      - POLITICDATA_DB=/data/politicdata.db
+      - PYTHONUNBUFFERED=1
+      - PYTHONDONTWRITEBYTECODE=1
+      # Only a dev-server/service flag; the app itself does not read BASE44_* values.
+      - BASE44_PREVIEW_MODE
+    env_file:
+      # Local development placeholders first, platform-provided secrets last so a
+      # real value always wins (e.g. POLITICDATA_ADMIN / POLITICDATA_PASSWORD).
+      - path: ./.env.base44-defaults
+        required: true
+      - path: /run/base44/app.env
+        required: false
+    ports:
+      # Host port 3000 is the preview entry point; the app listens on 8765.
+      - "3000:8765"
+    healthcheck:
+      # /health opens the database and runs a query, so this proves the app and
+      # its storage are both responsive.
+      test:
+        - CMD
+        - python
+        - -c
+        - import urllib.request; urllib.request.urlopen('http://127.0.0.1:8765/health', timeout=3)
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
+    restart: on-failure
+
+volumes:
+  politicdata-data:

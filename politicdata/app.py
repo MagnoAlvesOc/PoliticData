@@ -220,6 +220,7 @@ class Handler(BaseHTTPRequestHandler):
         if path=='/': return self.send(200,(BASE/'index.html').read_bytes(),'text/html')
         if path=='/app.js':return self.send(200,(BASE/'app.js').read_bytes(),'text/javascript')
         if path=='/style.css':return self.send(200,(BASE/'style.css').read_bytes(),'text/css')
+        if path=='/scanner.js':return self.send(200,(BASE/'scanner.js').read_bytes(),'text/javascript')
         if path=='/setores-ibge.geojson':
             candidates=[BASE/'data'/'Setores_Censitarios_Sao_Luis_IBGE_2022.geojson',
                         BASE.parent/'data'/'Setores_Censitarios_Sao_Luis_IBGE_2022.geojson']
