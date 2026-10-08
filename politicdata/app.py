@@ -1,7 +1,7 @@
 """PoliticData: local leadership and public aggregate electoral reporting tool.
 Runs with Python 3.10+ standard library only. Localhost by default.
 """
-import csv, hashlib, hmac, io, json, os, secrets, sqlite3, time, base64, zipfile
+import csv, hashlib, hmac, io, json, os, secrets, sqlite3, sys, time, base64, zipfile
 import xml.etree.ElementTree as ET
 from datetime import date, datetime
 from http import HTTPStatus
@@ -428,11 +428,22 @@ def ensure_postgres_driver():
         import subprocess,sys
         subprocess.check_call([sys.executable,'-m','pip','install','--disable-pip-version-check','psycopg[binary]==3.2.10'])
 
+class Server(ThreadingHTTPServer):
+    """Servidor que trata desconexões do cliente como situação normal.
+
+    Recarregar a página ou cancelar um download (mapa IBGE de 1 MB, backup) fecha a
+    conexão durante a resposta; isso não é falha da aplicação e não deve gerar traceback.
+    """
+    daemon_threads=True
+    def handle_error(self,request,client_address):
+        if isinstance(sys.exc_info()[1],(BrokenPipeError,ConnectionResetError)):return
+        super().handle_error(request,client_address)
+
 def main():
     ensure_postgres_driver()
     init()
     restore_official_elections()
     host=os.environ.get('POLITICDATA_HOST','0.0.0.0' if os.environ.get('RENDER') else '127.0.0.1');port=int(os.environ.get('PORT',os.environ.get('POLITICDATA_PORT','8765')))
     print(f'PoliticData disponível em http://{host}:{port}',flush=True)
-    ThreadingHTTPServer((host,port),Handler).serve_forever()
+    Server((host,port),Handler).serve_forever()
 if __name__=='__main__':main()
