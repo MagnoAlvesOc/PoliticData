@@ -14,8 +14,12 @@ BASE=Path(__file__).resolve().parent
 DB=Path(os.environ.get('POLITICDATA_DB',str(BASE/'politicdata.db')))
 SESSIONS={}
 MAX_BODY=5_000_000
+USE_POSTGRES=bool(os.environ.get('DATABASE_URL'))
 
 def connect():
+    if USE_POSTGRES:
+        from pg_adapter import PgConnection
+        return PgConnection(os.environ['DATABASE_URL'])
     db=sqlite3.connect(DB,timeout=12)
     db.row_factory=sqlite3.Row
     db.execute('PRAGMA foreign_keys=ON')
@@ -23,6 +27,11 @@ def connect():
     return db
 
 def init():
+    if USE_POSTGRES:
+        with connect() as db:
+            db.executescript((BASE/'neon_schema.sql').read_text(encoding='utf-8'))
+            initialize_admin(db)
+        return
     with connect() as db:
         db.executescript('''
         CREATE TABLE IF NOT EXISTS users(id INTEGER PRIMARY KEY,username TEXT UNIQUE NOT NULL,password_hash TEXT NOT NULL,salt TEXT NOT NULL);
@@ -64,6 +73,16 @@ def init():
             hashed=hashlib.pbkdf2_hmac('sha256',password.encode(),bytes.fromhex(salt),260000).hex()
             db.execute('INSERT INTO users(username,password_hash,salt) VALUES(?,?,?)',(user,hashed,salt))
 
+def initialize_admin(db):
+    if db.execute('SELECT count(*) FROM users').fetchone()['count']>0:return
+    user=os.environ.get('POLITICDATA_ADMIN','admin')
+    password=os.environ.get('POLITICDATA_PASSWORD')
+    if not password or len(password)<12:
+        raise RuntimeError('Defina POLITICDATA_PASSWORD com no mínimo 12 caracteres antes de ativar PostgreSQL')
+    salt=secrets.token_hex(16)
+    hashed=hashlib.pbkdf2_hmac('sha256',password.encode(),bytes.fromhex(salt),260000).hex()
+    db.execute('INSERT INTO users(username,password_hash,salt) VALUES(?,?,?)',(user,hashed,salt))
+
 def restore_official_elections():
     """Restaurar base pública oficial a partir do CSV versionado no repositório.
     Faz upsert idempotente; jamais elimina cadastros ou dados administrativos.
@@ -75,7 +94,7 @@ def restore_official_elections():
         print('Base oficial ainda não disponível no pacote: '+str(source_file),flush=True)
         return
     with connect() as db:
-        present=db.execute("SELECT count(*) FROM elections WHERE election_year=2024 AND municipality='São Luís' AND candidate='TOTAL VOTOS NOMINAIS - VEREADOR'").fetchone()[0]
+        present=db.execute("SELECT count(*) FROM elections WHERE election_year=2024 AND municipality='São Luís' AND candidate='TOTAL VOTOS NOMINAIS - VEREADOR'").fetchone()['count'] if USE_POSTGRES else db.execute("SELECT count(*) FROM elections WHERE election_year=2024 AND municipality='São Luís' AND candidate='TOTAL VOTOS NOMINAIS - VEREADOR'").fetchone()[0]
         if present>=2173:
             print('Base TSE São Luís 2024 já cadastrada: '+str(present)+' registros',flush=True)
             return
