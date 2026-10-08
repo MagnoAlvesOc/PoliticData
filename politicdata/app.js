@@ -260,7 +260,6 @@ async function contactPage(){
  ['contactFilterLeader','contactFilterSearch','contactFilterBairro'].forEach(id=>$('#'+id).addEventListener(id==='contactFilterSearch'?'input':'change',renderContactList));
  function editContact(contactId){
    const c=records.find(row=>row.id===contactId);if(!c)return;
-   const c=records.find(row=>row.id===Number(button.dataset.contactEdit));if(!c)return;
    const box=$('#contactEditArea');
    box.innerHTML=form('Corrigir cadastro: '+esc(c.name),field('Nome','name','text','required maxlength="150"')+
      field('Telefone','phone')+field('Bairro','neighborhood')+
