@@ -228,6 +228,13 @@ class Handler(BaseHTTPRequestHandler):
                 d['demands_by_status']=rows(db,'SELECT status,count(*) total FROM demands GROUP BY status')
                 d['expense_by_category']=rows(db,'SELECT category,sum(amount) total FROM expenses GROUP BY category ORDER BY total DESC')
                 return self.send(200,d)
+            if path=='/api/backup':
+                names=['leaders','meetings','demands','expenses','contacts']
+                result={'format':'politicdata-backup-v1','created_at':datetime.utcnow().isoformat()+'Z',
+                        'tables':{name:rows(db,'SELECT * FROM '+name) for name in names}}
+                raw=json.dumps(result,ensure_ascii=False,default=str).encode('utf-8')
+                return self.send(200,raw,'application/json',extra=[
+                    ('Content-Disposition','attachment; filename="politicdata_backup.json"')])
             if path=='/api/leader-summary':
                 return self.send(200,rows(db,"SELECT COALESCE(NULLIF(trim(neighborhood),''),'Não informado') neighborhood,count(*) total FROM leaders GROUP BY COALESCE(NULLIF(trim(neighborhood),''),'Não informado') ORDER BY total DESC"))
             if path=='/api/contacts':
