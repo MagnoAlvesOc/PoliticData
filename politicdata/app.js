@@ -60,6 +60,7 @@ function scannerPage(){
    document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);
   },'image/png');
  };
+ if(typeof enhanceScanner==='function')enhanceScanner();
 }
 
 function attachForm(id,endpoint,convert){$('#'+id).addEventListener('submit',async ev=>{ev.preventDefault();let b=Object.fromEntries(new FormData(ev.target));try{await api(endpoint,'POST',convert?convert(b):b);msg('Registro salvo com sucesso');await navigate(page)}catch(e){alert(e.message)}})}
