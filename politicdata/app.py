@@ -196,7 +196,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header('Referrer-Policy','no-referrer')
         self.send_header('X-Permitted-Cross-Domain-Policies','none')
         self.send_header('Permissions-Policy','camera=(), microphone=(), geolocation=()')
-        self.send_header('Content-Security-Policy',"default-src 'self' https://unpkg.com; style-src 'self' 'unsafe-inline' https://unpkg.com; img-src 'self' data: https://*.tile.openstreetmap.org https://unpkg.com; script-src 'self' https://unpkg.com; connect-src 'self' https://*.tile.openstreetmap.org")
+        self.send_header('Content-Security-Policy',"default-src 'self' https://unpkg.com; style-src 'self' 'unsafe-inline' https://unpkg.com; img-src 'self' data: https://*.tile.openstreetmap.org https://unpkg.com; script-src 'self' https://unpkg.com 'unsafe-eval'; worker-src 'self' blob:; connect-src 'self' https://*.tile.openstreetmap.org https://unpkg.com https://cdn.jsdelivr.net https://tessdata.projectnaptha.com")
         for k,v in extra or []: self.send_header(k,v)
         self.end_headers(); self.wfile.write(raw)
     def current(self):
