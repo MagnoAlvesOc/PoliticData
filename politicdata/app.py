@@ -224,6 +224,13 @@ class Handler(BaseHTTPRequestHandler):
                     return self.send(200,candidate.read_bytes(),'application/geo+json')
             return self.send(404,{'error':'Malha IBGE ainda não foi adicionada ao repositório'})
 
+        if path=='/health':
+            try:
+                with connect() as db:
+                    db.execute('SELECT 1').fetchone()
+                return self.send(200,{'status':'ok','database':'postgresql' if USE_POSTGRES else 'sqlite'})
+            except Exception:
+                return self.send(503,{'status':'unavailable'})
         if path=='/api/session':
             s=self.current();return self.send(200,{'logged_in':bool(s),'username':s['username'] if s else None,'csrf':s['csrf'] if s else None})
         if not self.current():return self.send(401,{'error':'Autenticação necessária'})
