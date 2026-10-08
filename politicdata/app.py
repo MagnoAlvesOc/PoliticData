@@ -409,7 +409,15 @@ class Handler(BaseHTTPRequestHandler):
             print('Server error:',repr(e),flush=True)
             return self.send(500,{'error':'Erro interno, consulte o terminal'})
 
+def ensure_postgres_driver():
+    if not USE_POSTGRES:return
+    try:import psycopg
+    except ImportError:
+        import subprocess,sys
+        subprocess.check_call([sys.executable,'-m','pip','install','--disable-pip-version-check','psycopg[binary]==3.2.10'])
+
 def main():
+    ensure_postgres_driver()
     init()
     restore_official_elections()
     host=os.environ.get('POLITICDATA_HOST','0.0.0.0' if os.environ.get('RENDER') else '127.0.0.1');port=int(os.environ.get('PORT',os.environ.get('POLITICDATA_PORT','8765')))
