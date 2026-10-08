@@ -381,6 +381,9 @@ class Handler(BaseHTTPRequestHandler):
                     if not name:raise ValueError('Nome obrigatório')
                     fields=['name','nickname','phone','region','neighborhood','activity','notes','electoral_zone','electoral_section','address']
                     vals=[clean(b.get(k),4000 if k=='notes' else 250) for k in fields]
+                    # Situação do cadastro: o formulário envia archived=0 (ativo) ou 1 (arquivado).
+                    if 'archived' in b:
+                        fields.append('archived');vals.append(1 if str(b.get('archived')).strip()=='1' else 0)
                     cur=db.execute("UPDATE leaders SET "+','.join(k+'=?' for k in fields)+" WHERE id=? AND archived=0",(*vals,lid))
                     if not cur.rowcount:raise ValueError('Liderança não encontrada')
                 elif path=='/api/leaders/archive':
@@ -454,7 +457,8 @@ class Handler(BaseHTTPRequestHandler):
                 elif path=='/api/leaders':
                     name=clean(b.get('name'),150)
                     if not name:raise ValueError('Nome obrigatório')
-                    cur=db.execute('INSERT INTO leaders(name,nickname,phone,region,neighborhood,activity,notes,electoral_zone,electoral_section,address) VALUES(?,?,?,?,?,?,?,?,?,?)',(name,clean(b.get('nickname'),100),clean(b.get('phone'),70),clean(b.get('region'),100),clean(b.get('neighborhood'),120),clean(b.get('activity'),120),clean(b.get('notes')),clean(b.get('electoral_zone'),20),clean(b.get('electoral_section'),20),clean(b.get('address'),250)))
+                    archived=1 if str(b.get('archived','0')).strip()=='1' else 0
+                    cur=db.execute('INSERT INTO leaders(name,nickname,phone,region,neighborhood,activity,notes,electoral_zone,electoral_section,address,archived) VALUES(?,?,?,?,?,?,?,?,?,?,?)',(name,clean(b.get('nickname'),100),clean(b.get('phone'),70),clean(b.get('region'),100),clean(b.get('neighborhood'),120),clean(b.get('activity'),120),clean(b.get('notes')),clean(b.get('electoral_zone'),20),clean(b.get('electoral_section'),20),clean(b.get('address'),250),archived))
                 elif path=='/api/meetings':
                     cur=db.execute('INSERT INTO meetings(leader_id,meeting_date,kind,summary,next_action) VALUES(?,?,?,?,?)',(int(b['leader_id']),date_ok(b['meeting_date']),clean(b.get('kind'),60) or 'reunião',clean(b['summary']),clean(b.get('next_action'))))
                 elif path=='/api/demands':

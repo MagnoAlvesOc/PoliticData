@@ -115,6 +115,7 @@ function leaderFields(){
  field('Bairro','neighborhood')+field('Zona eleitoral','electoral_zone')+
  field('Seção eleitoral','electoral_section')+field('Endereço administrativo','address')+
  field('Atuação','activity')+
+ '<label>Situação do cadastro<select name="archived"><option value="0">Ativo</option><option value="1">Arquivado</option></select></label>'+
  '<label class="wide">Observações<textarea name="notes"></textarea></label>';
 }
 function editLeader(id){
@@ -122,7 +123,7 @@ function editLeader(id){
  const area=$('#leaderDetails');
  area.innerHTML=form('Editar liderança: '+esc(l.name),leaderFields(),'editLeaderForm');
  const f=$('#editLeaderForm');
- for(const [key,value] of Object.entries(l)){const el=f.elements.namedItem(key);if(el&&'value' in el)el.value=value??''}
+ for(const [key,value] of Object.entries(l)){const el=f.elements.namedItem(key);if(el&&'value' in el)el.value=key==='archived'?(value?'1':'0'):value??''}
  f.onsubmit=async e=>{e.preventDefault();try{await api('leaders/update','POST',{...Object.fromEntries(new FormData(f)),id});msg('Liderança atualizada');await navigate('leaders')}catch(err){alert(err.message)}};
  area.scrollIntoView({behavior:'smooth',block:'start'});
 }
