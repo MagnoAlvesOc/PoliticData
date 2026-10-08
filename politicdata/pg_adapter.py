@@ -11,11 +11,11 @@ def convert_sql(sql):
     return sql.replace('?', '%s')
 
 class PgResult:
-    def __init__(self, cursor):
+    def __init__(self, cursor, inserted=False):
         self.cursor=cursor
         self.rowcount=cursor.rowcount
         self.lastrowid=None
-        if cursor.description and cursor.description[0].name=='id':
+        if inserted and cursor.description and cursor.description[0].name=='id':
             row=cursor.fetchone()
             if row:self.lastrowid=row['id']
     def fetchone(self):return self.cursor.fetchone()
@@ -32,9 +32,10 @@ class PgConnection:
         finally:self.conn.close()
     def execute(self,sql,args=()):
         statement=convert_sql(sql)
-        if statement.lstrip().upper().startswith('INSERT INTO') and 'RETURNING' not in statement.upper():
+        inserted=statement.lstrip().upper().startswith('INSERT INTO')
+        if inserted and 'RETURNING' not in statement.upper():
             statement += ' RETURNING id'
         cursor=self.conn.execute(statement,args)
-        return PgResult(cursor)
+        return PgResult(cursor,inserted)
     def executescript(self,script):
         self.conn.execute(script)
