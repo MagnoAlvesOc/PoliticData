@@ -14,7 +14,7 @@ BASE=Path(__file__).resolve().parent
 DB=Path(os.environ.get('POLITICDATA_DB',str(BASE/'politicdata.db')))
 SESSIONS={}
 MAX_BODY=5_000_000
-USE_POSTGRES=bool(os.environ.get('DATABASE_URL'))
+USE_POSTGRES=bool(os.environ.get('DATABASE_URL')) and os.environ.get('POLITICDATA_USE_POSTGRES','0')=='1'
 
 def connect():
     if USE_POSTGRES:
