@@ -10,7 +10,58 @@ function field(label,name,type='text',extra=''){return `<label>${label}<input na
 function selectLeader(){return `<label>Liderança<select name="leader_id" required>${leaderOptions()}</select></label>`}
 function form(title,items,id){return `<div class="card section"><h3>${title}</h3><form id="${id}" class="form-grid">${items}<div class="form-actions"><button class="primary" type="submit">Salvar registro</button></div></form></div>`}
 async function loadLeaders(){leaders=await api('leaders')}
-async function navigate(p){page=p;document.querySelectorAll('nav button').forEach(b=>b.classList.toggle('active',b.dataset.page===p));$('#pageTitle').textContent=({dashboard:'Visão geral',leaders:'Lideranças',meetings:'Diário de reuniões',demands:'Demandas e encaminhamentos',expenses:'Registros financeiros',elections:'Resultados eleitorais públicos',map:'Mapa geográfico dos resultados',import:'Importar dados',territory:'Distribuição administrativa',contacts:'Eleitorado'})[p];$('#sectionLabel').textContent='POLITICDATA / '+p.toUpperCase();$('#content').innerHTML='<div class="card">Carregando...</div>';mapInstance=null;try{await loadLeaders();await ({dashboard,leaders:leaderPage,meetings:meetingPage,demands:demandPage,expenses:expensePage,elections:electionPage,map:mapPage,import:importPage,territory:territoryPage,contacts:contactPage})[p]()}catch(e){$('#content').innerHTML=`<div class="card danger">Erro: ${esc(e.message)}</div>`}}
+async function navigate(p){page=p;document.querySelectorAll('nav button').forEach(b=>b.classList.toggle('active',b.dataset.page===p));$('#pageTitle').textContent=({dashboard:'Visão geral',leaders:'Lideranças',meetings:'Diário de reuniões',demands:'Demandas e encaminhamentos',expenses:'Registros financeiros',elections:'Resultados eleitorais públicos',map:'Mapa geográfico dos resultados',import:'Importar dados',territory:'Distribuição administrativa',contacts:'Eleitorado',scanner:'Escaneador de páginas'})[p];$('#sectionLabel').textContent='POLITICDATA / '+p.toUpperCase();$('#content').innerHTML='<div class="card">Carregando...</div>';mapInstance=null;try{await loadLeaders();await ({dashboard,leaders:leaderPage,meetings:meetingPage,demands:demandPage,expenses:expensePage,elections:electionPage,map:mapPage,import:importPage,territory:territoryPage,contacts:contactPage,scanner:scannerPage})[p]()}catch(e){$('#content').innerHTML=`<div class="card danger">Erro: ${esc(e.message)}</div>`}}
+
+function scannerPage(){
+ $('#content').innerHTML = '<div class="notice">Digitalização local: a imagem permanece no seu dispositivo até você decidir baixá-la. Esta ferramenta não extrai dados pessoais nem envia arquivos ao cadastro eleitoral.</div>'+
+ '<div class="card section"><h3>Escaneador de páginas</h3><p>Fotografe uma página ou selecione uma imagem. Confira a nitidez antes de salvar.</p>'+
+ '<label>Fotografar ou selecionar página<input id="scanFile" type="file" accept="image/*" capture="environment"></label>'+
+ '<div class="toolbar" style="margin-top:12px;display:flex;gap:10px;flex-wrap:wrap">'+
+ '<button type="button" id="scanLeft" class="outline" disabled>Girar à esquerda</button>'+
+ '<button type="button" id="scanRight" class="outline" disabled>Girar à direita</button>'+
+ '<button type="button" id="scanSave" class="primary" disabled>Baixar imagem digitalizada</button></div>'+
+ '<p id="scanInfo" role="status" class="muted mini">Nenhuma página selecionada.</p>'+
+ '<div style="overflow:auto;max-height:68vh;margin-top:14px"><canvas id="scanCanvas" style="display:none;max-width:100%;height:auto;border:1px solid #b7c8d9;border-radius:8px"></canvas></div>'+
+ '</div>';
+ let current=null,rotation=0;
+ const file=$('#scanFile'),canvas=$('#scanCanvas'),context=canvas.getContext('2d');
+ const status=$('#scanInfo'),left=$('#scanLeft'),right=$('#scanRight'),save=$('#scanSave');
+ function redraw(){
+  if(!current)return;
+  const maxSide=2600,ratio=Math.min(1,maxSide/Math.max(current.naturalWidth,current.naturalHeight));
+  const w=Math.max(1,Math.round(current.naturalWidth*ratio)),h=Math.max(1,Math.round(current.naturalHeight*ratio));
+  const swapped=rotation%180!==0;
+  canvas.width=swapped?h:w;canvas.height=swapped?w:h;
+  context.fillStyle='#ffffff';context.fillRect(0,0,canvas.width,canvas.height);
+  context.translate(canvas.width/2,canvas.height/2);context.rotate(rotation*Math.PI/180);
+  context.drawImage(current,-w/2,-h/2,w,h);
+  context.setTransform(1,0,0,1,0,0);
+  canvas.style.display='block';
+  status.textContent='Página pronta: '+canvas.width+' × '+canvas.height+' pixels. Confira se todo o texto está visível.';
+  left.disabled=right.disabled=save.disabled=false;
+ }
+ file.addEventListener('change',()=>{
+  const chosen=file.files&&file.files[0];if(!chosen)return;
+  if(!chosen.type.startsWith('image/')){status.textContent='Selecione uma imagem válida.';return}
+  if(chosen.size>15*1024*1024){status.textContent='O arquivo deve ter até 15 MB.';return}
+  const url=URL.createObjectURL(chosen),img=new Image();
+  img.onload=()=>{URL.revokeObjectURL(url);current=img;rotation=0;redraw()};
+  img.onerror=()=>{URL.revokeObjectURL(url);status.textContent='Não foi possível abrir a imagem.'};
+  img.src=url;
+ });
+ left.onclick=()=>{rotation=(rotation+270)%360;redraw()};
+ right.onclick=()=>{rotation=(rotation+90)%360;redraw()};
+ save.onclick=()=>{
+  if(!current)return;
+  canvas.toBlob(blob=>{
+   if(!blob){status.textContent='Não foi possível salvar a imagem.';return}
+   const url=URL.createObjectURL(blob),a=document.createElement('a');
+   a.href=url;a.download='politicdata_pagina_'+Date.now()+'.png';
+   document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);
+  },'image/png');
+ };
+}
+
 function attachForm(id,endpoint,convert){$('#'+id).addEventListener('submit',async ev=>{ev.preventDefault();let b=Object.fromEntries(new FormData(ev.target));try{await api(endpoint,'POST',convert?convert(b):b);msg('Registro salvo com sucesso');await navigate(page)}catch(e){alert(e.message)}})}
 async function downloadAdminBackup(){
  try{
