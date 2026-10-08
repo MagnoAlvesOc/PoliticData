@@ -77,8 +77,8 @@ def initialize_admin(db):
     if db.execute('SELECT count(*) FROM users').fetchone()['count']>0:return
     user=os.environ.get('POLITICDATA_ADMIN','admin')
     password=os.environ.get('POLITICDATA_PASSWORD')
-    if not password or len(password)<12:
-        raise RuntimeError('Defina POLITICDATA_PASSWORD com no mínimo 12 caracteres antes de ativar PostgreSQL')
+    if not password:
+        raise RuntimeError('POLITICDATA_PASSWORD precisa estar configurada para ativar PostgreSQL')
     salt=secrets.token_hex(16)
     hashed=hashlib.pbkdf2_hmac('sha256',password.encode(),bytes.fromhex(salt),260000).hex()
     db.execute('INSERT INTO users(username,password_hash,salt) VALUES(?,?,?)',(user,hashed,salt))
