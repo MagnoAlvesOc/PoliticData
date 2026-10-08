@@ -10,6 +10,11 @@ def convert_sql(sql):
     sql=sql.replace("date('now')","to_char(CURRENT_DATE,'YYYY-MM-DD')")
     return sql.replace('?', '%s')
 
+class CompatibleRow(dict):
+    def __getitem__(self,key):
+        if isinstance(key,int):return list(self.values())[key]
+        return super().__getitem__(key)
+
 class PgResult:
     def __init__(self, cursor, inserted=False):
         self.cursor=cursor
@@ -18,8 +23,10 @@ class PgResult:
         if inserted and cursor.description and cursor.description[0].name=='id':
             row=cursor.fetchone()
             if row:self.lastrowid=row['id']
-    def fetchone(self):return self.cursor.fetchone()
-    def fetchall(self):return self.cursor.fetchall()
+    def fetchone(self):
+        r=self.cursor.fetchone()
+        return CompatibleRow(r) if r is not None else None
+    def fetchall(self):return [CompatibleRow(r) for r in self.cursor.fetchall()]
 
 class PgConnection:
     def __init__(self,url):
