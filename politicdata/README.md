@@ -73,3 +73,11 @@ Para produção: HTTPS e proxy seguro, usuários e RBAC, logs imutáveis, backup
 - A importação de planilhas do Eleitorado aceita as colunas CPF e Nome da mãe, e a tabela do diretório exibe as duas colunas, com busca por CPF.
 - A importação de lideranças continua recusando CPF e nome da mãe.
 - CPF e nome da mãe são dados pessoais: trate-os como confidenciais, mantenha backup privado e avalie as bases legais da LGPD antes de uso real.
+
+## Atualização 1.4 — diretório Lideranças e escaneador inteligente
+- Lideranças: tabela com Apelido, Telefone, Região, Bairro, Endereço, Zona, Seção, Atuação, Observações, Reuniões e a coluna Situação do cadastro (Ativo/Arquivado), com filtro Ativos/Arquivados/Todos. Lideranças arquivadas voltam a aparecer em modo de consulta e podem ser reativadas.
+- Escaneador: cada página tem número, imagem, três blocos de pessoa, campos reconhecidos, alerta de campos ilegíveis, texto original do OCR e confiança da leitura. Nome completo, CPF, nome da mãe, telefone, endereço, bairro, escolaridade, zona e seção eleitoral são extraídos por OCR local no navegador e podem ser corrigidos manualmente.
+- Regra de três pessoas: cada pessoa da página corresponde a um cadastro independente no Eleitorado. Só as pessoas marcadas como conferidas viram cadastro ao salvar; as demais ficam pendentes.
+- Aba Uploads recentes: histórico das páginas com imagem, situação da revisão (pendente/conferido), cadastro vinculado a cada pessoa, exportação em JSON e ação para cadastrar pendentes.
+- A imagem é reduzida para 1600 px e guardada no banco local do servidor; o OCR continua sendo executado no navegador, sem enviar arquivos a serviços externos.
+- Atenção: o escaneador agora armazena imagem e dados pessoais lidos. Mantenha o banco em volume privado, faça backup criptografado e defina retenção conforme a LGPD.

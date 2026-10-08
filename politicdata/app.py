@@ -66,6 +66,18 @@ def init():
         db.execute("CREATE INDEX IF NOT EXISTS idx_contacts_leader ON contacts(leader_id)")
         leader_cols={r[1] for r in db.execute('PRAGMA table_info(leaders)')}
         if 'archived' not in leader_cols: db.execute("ALTER TABLE leaders ADD COLUMN archived INTEGER NOT NULL DEFAULT 0")
+        # Escaneador: cada página guarda a imagem e três blocos; cada bloco pode originar
+        # um cadastro independente no Eleitorado (contact_id).
+        db.execute("""CREATE TABLE IF NOT EXISTS scan_pages(
+            id INTEGER PRIMARY KEY, page_number TEXT NOT NULL, layout TEXT NOT NULL DEFAULT 'vertical',
+            image TEXT, status TEXT NOT NULL DEFAULT 'pendente', created_at TEXT DEFAULT CURRENT_TIMESTAMP)""")
+        db.execute("""CREATE TABLE IF NOT EXISTS scan_people(
+            id INTEGER PRIMARY KEY, page_id INTEGER NOT NULL REFERENCES scan_pages(id) ON DELETE CASCADE,
+            position INTEGER NOT NULL, name TEXT, cpf TEXT, mother_name TEXT, phone TEXT, address TEXT,
+            neighborhood TEXT, schooling TEXT, electoral_zone TEXT, electoral_section TEXT, raw_text TEXT,
+            confidence REAL NOT NULL DEFAULT 0, reviewed INTEGER NOT NULL DEFAULT 0,
+            contact_id INTEGER REFERENCES contacts(id) ON DELETE SET NULL)""")
+        db.execute("CREATE INDEX IF NOT EXISTS idx_scan_people_page ON scan_people(page_id)")
         count=db.execute('SELECT count(*) FROM users').fetchone()[0]
         if count==0:
             user=os.environ.get('POLITICDATA_ADMIN','admin')
@@ -174,6 +186,28 @@ def parse_excel_base64(data):
         return [{key:str(row.get(j,'')).strip() for j,key in enumerate(keys) if key} for row in values[1:]]
 
 def rows(db,sql,args=()): return [dict(x) for x in db.execute(sql,args).fetchall()]
+def insert_contact(db,data,notes):
+    """Insere um cadastro no Eleitorado e devolve o id gerado."""
+    value=lambda key,limit: clean(data.get(key),limit)
+    cur=db.execute("INSERT INTO contacts(name,phone,neighborhood,notes,leader_id,address,schooling,electoral_zone,electoral_section,cpf,mother_name) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+        (value('name',150),value('phone',70),value('neighborhood',120),clean(notes,500),None,value('address',250),value('schooling',100),value('electoral_zone',20),value('electoral_section',20),value('cpf',20),value('mother_name',150)))
+    return cur.lastrowid
+def register_scan_people(db,page,only_reviewed=True):
+    """Cada pessoa da página corresponde a um cadastro independente no Eleitorado."""
+    sql='SELECT * FROM scan_people WHERE page_id=? AND contact_id IS NULL'
+    if only_reviewed:sql+=' AND reviewed=1'
+    created=0
+    for person in db.execute(sql+' ORDER BY position',(page['id'],)).fetchall():
+        record=dict(person)
+        if not clean(record.get('name'),150):continue
+        contact_id=insert_contact(db,record,'Gerado pelo escaneador, página '+clean(page['page_number'],30))
+        db.execute('UPDATE scan_people SET contact_id=?,reviewed=1 WHERE id=?',(contact_id,record['id']))
+        created+=1
+    total=db.execute('SELECT count(*) FROM scan_people WHERE page_id=?',(page['id'],)).fetchone()[0]
+    registered=db.execute('SELECT count(*) FROM scan_people WHERE page_id=? AND contact_id IS NOT NULL',(page['id'],)).fetchone()[0]
+    status='conferido' if total and registered>=total else 'pendente'
+    db.execute('UPDATE scan_pages SET status=? WHERE id=?',(status,page['id']))
+    return {'page_id':page['id'],'registered':created,'pending':max(0,total-registered),'status':status}
 def check_password(p,salt,expected): return hmac.compare_digest(hashlib.pbkdf2_hmac('sha256',p.encode(),bytes.fromhex(salt),260000).hex(),expected)
 def clean(v,maxlen=4000): return str(v or '').strip()[:maxlen]
 def real(v):
@@ -221,6 +255,7 @@ class Handler(BaseHTTPRequestHandler):
         if path=='/app.js':return self.send(200,(BASE/'app.js').read_bytes(),'text/javascript')
         if path=='/style.css':return self.send(200,(BASE/'style.css').read_bytes(),'text/css')
         if path=='/scanner.js':return self.send(200,(BASE/'scanner.js').read_bytes(),'text/javascript')
+        if path=='/uploads.js':return self.send(200,(BASE/'uploads.js').read_bytes(),'text/javascript')
         if path=='/setores-ibge.geojson':
             candidates=[BASE/'data'/'Setores_Censitarios_Sao_Luis_IBGE_2022.geojson',
                         BASE.parent/'data'/'Setores_Censitarios_Sao_Luis_IBGE_2022.geojson']
@@ -273,7 +308,15 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send(200,rows(db,"SELECT COALESCE(NULLIF(trim(neighborhood),''),'Não informado') neighborhood,count(*) total FROM leaders GROUP BY COALESCE(NULLIF(trim(neighborhood),''),'Não informado') ORDER BY total DESC"))
             if path=='/api/contacts':
                 return self.send(200,rows(db,"SELECT c.*,l.name leader_name FROM contacts c LEFT JOIN leaders l ON l.id=c.leader_id ORDER BY c.name LIMIT 10000"))
-            if path=='/api/leaders':return self.send(200,rows(db,'SELECT l.*, (SELECT max(meeting_date) FROM meetings WHERE leader_id=l.id) last_meeting,(SELECT count(*) FROM demands WHERE leader_id=l.id AND status IN (\'aberta\',\'em andamento\')) open_demands FROM leaders l WHERE l.archived=0 ORDER BY l.name'))
+            if path=='/api/scans':
+                return self.send(200,rows(db,"""SELECT p.id,p.page_number,p.layout,p.status,p.created_at,
+                    (SELECT count(*) FROM scan_people WHERE page_id=p.id) people,
+                    (SELECT count(*) FROM scan_people WHERE page_id=p.id AND contact_id IS NOT NULL) registered
+                    FROM scan_pages p ORDER BY p.id DESC LIMIT 100"""))
+            if path=='/api/leaders':
+                scope=clean(parse_qs(urlparse(self.path).query).get('scope',[''])[0],20)
+                where='' if scope=='all' else ' WHERE l.archived=0'
+                return self.send(200,rows(db,'SELECT l.*, (SELECT max(meeting_date) FROM meetings WHERE leader_id=l.id) last_meeting,(SELECT count(*) FROM demands WHERE leader_id=l.id AND status IN (\'aberta\',\'em andamento\')) open_demands FROM leaders l'+where+' ORDER BY l.name'))
             if path=='/api/meetings':return self.send(200,rows(db,'SELECT m.*,l.name leader_name FROM meetings m JOIN leaders l ON l.id=m.leader_id ORDER BY meeting_date DESC,id DESC'))
             if path=='/api/demands':return self.send(200,rows(db,'SELECT d.*,l.name leader_name FROM demands d JOIN leaders l ON l.id=d.leader_id ORDER BY opened_at DESC,id DESC'))
             if path=='/api/expenses':return self.send(200,rows(db,'SELECT e.*,l.name leader_name FROM expenses e LEFT JOIN leaders l ON l.id=e.leader_id ORDER BY expense_date DESC,id DESC'))
@@ -344,6 +387,10 @@ class Handler(BaseHTTPRequestHandler):
                     lid=int(b['id'])
                     cur=db.execute("UPDATE leaders SET archived=1 WHERE id=? AND archived=0",(lid,))
                     if not cur.rowcount:raise ValueError('Liderança não encontrada')
+                elif path=='/api/leaders/restore':
+                    lid=int(b['id'])
+                    cur=db.execute("UPDATE leaders SET archived=0 WHERE id=? AND archived=1",(lid,))
+                    if not cur.rowcount:raise ValueError('Liderança não encontrada')
                 elif path=='/api/contacts/update':
                     cid=int(b['id'])
                     name=clean(b.get('name'),150)
@@ -380,6 +427,30 @@ class Handler(BaseHTTPRequestHandler):
                             (name,phone,neighborhood,clean(rec.get('notes'),500),lid,clean(rec.get('address'),250),clean(rec.get('schooling'),100),clean(rec.get('electoral_zone'),20),clean(rec.get('electoral_section'),20),clean(rec.get('cpf'),20),clean(rec.get('mother_name'),150)))
                         imported+=1
                     return self.send(200,{'imported':imported,'skipped':skipped})
+                elif path=='/api/scans':
+                    number=clean(b.get('page_number'),30)
+                    if not number:raise ValueError('Informe o número da página')
+                    image=clean(b.get('image'),3_000_000)
+                    if image and not image.startswith('data:image/'):raise ValueError('Imagem da página inválida')
+                    people=b.get('people')
+                    if not isinstance(people,list) or not 1<=len(people)<=3:raise ValueError('Cada página deve conter até três pessoas')
+                    cur=db.execute('INSERT INTO scan_pages(page_number,layout,image) VALUES(?,?,?)',(number,clean(b.get('layout'),20) or 'vertical',image))
+                    page_id=cur.lastrowid
+                    for index,person in enumerate(people):
+                        if not isinstance(person,dict):raise ValueError('Bloco de pessoa inválido')
+                        db.execute("""INSERT INTO scan_people(page_id,position,name,cpf,mother_name,phone,address,neighborhood,schooling,electoral_zone,electoral_section,raw_text,confidence,reviewed)
+                            VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                            (page_id,index+1,clean(person.get('name'),150),clean(person.get('cpf'),20),clean(person.get('mother_name'),150),clean(person.get('phone'),70),clean(person.get('address'),250),clean(person.get('neighborhood'),120),clean(person.get('schooling'),100),clean(person.get('electoral_zone'),20),clean(person.get('electoral_section'),20),clean(person.get('raw_text'),4000),real(person.get('confidence') or 0),1 if person.get('reviewed') else 0))
+                    page=db.execute('SELECT * FROM scan_pages WHERE id=?',(page_id,)).fetchone()
+                    return self.send(200,{'ok':True,**register_scan_people(db,page)})
+                elif path=='/api/scans/detail':
+                    page=db.execute('SELECT * FROM scan_pages WHERE id=?',(int(b['id']),)).fetchone()
+                    if not page:raise ValueError('Página não encontrada')
+                    return self.send(200,{'page':dict(page),'people':rows(db,'SELECT * FROM scan_people WHERE page_id=? ORDER BY position',(page['id'],))})
+                elif path=='/api/scans/register':
+                    page=db.execute('SELECT * FROM scan_pages WHERE id=?',(int(b['id']),)).fetchone()
+                    if not page:raise ValueError('Página não encontrada')
+                    return self.send(200,{'ok':True,**register_scan_people(db,page,only_reviewed=False)})
                 elif path=='/api/leaders':
                     name=clean(b.get('name'),150)
                     if not name:raise ValueError('Nome obrigatório')

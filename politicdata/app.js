@@ -1,4 +1,4 @@
-let csrf='',page='dashboard',leaders=[],elections=[],mapInstance=null;
+let csrf='',page='dashboard',leaders=[],leadersAll=[],elections=[],mapInstance=null,leaderScope='active';
 const $=s=>document.querySelector(s),esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const fmt=n=>Number(n||0).toLocaleString('pt-BR');const money=n=>Number(n||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
 const today=()=>new Date().toISOString().slice(0,10);
@@ -10,10 +10,10 @@ function field(label,name,type='text',extra=''){return `<label>${label}<input na
 function selectLeader(){return `<label>Liderança<select name="leader_id" required>${leaderOptions()}</select></label>`}
 function form(title,items,id){return `<div class="card section"><h3>${title}</h3><form id="${id}" class="form-grid">${items}<div class="form-actions"><button class="primary" type="submit">Salvar registro</button></div></form></div>`}
 async function loadLeaders(){leaders=await api('leaders')}
-async function navigate(p){page=p;document.querySelectorAll('nav button').forEach(b=>b.classList.toggle('active',b.dataset.page===p));$('#pageTitle').textContent=({dashboard:'Visão geral',leaders:'Lideranças',meetings:'Diário de reuniões',demands:'Demandas e encaminhamentos',expenses:'Registros financeiros',elections:'Resultados eleitorais públicos',map:'Mapa geográfico dos resultados',import:'Importar dados',territory:'Distribuição administrativa',contacts:'Eleitorado',scanner:'Escaneador de páginas'})[p];$('#sectionLabel').textContent='POLITICDATA / '+p.toUpperCase();$('#content').innerHTML='<div class="card">Carregando...</div>';mapInstance=null;try{await loadLeaders();await ({dashboard,leaders:leaderPage,meetings:meetingPage,demands:demandPage,expenses:expensePage,elections:electionPage,map:mapPage,import:importPage,territory:territoryPage,contacts:contactPage,scanner:scannerPage})[p]()}catch(e){$('#content').innerHTML=`<div class="card danger">Erro: ${esc(e.message)}</div>`}}
+async function navigate(p){page=p;document.querySelectorAll('nav button').forEach(b=>b.classList.toggle('active',b.dataset.page===p));$('#pageTitle').textContent=({dashboard:'Visão geral',leaders:'Lideranças',meetings:'Diário de reuniões',demands:'Demandas e encaminhamentos',expenses:'Registros financeiros',elections:'Resultados eleitorais públicos',map:'Mapa geográfico dos resultados',import:'Importar dados',territory:'Distribuição administrativa',contacts:'Eleitorado',scanner:'Escaneador de páginas',uploads:'Uploads recentes'})[p];$('#sectionLabel').textContent='POLITICDATA / '+p.toUpperCase();$('#content').innerHTML='<div class="card">Carregando...</div>';mapInstance=null;try{await loadLeaders();await ({dashboard,leaders:leaderPage,meetings:meetingPage,demands:demandPage,expenses:expensePage,elections:electionPage,map:mapPage,import:importPage,territory:territoryPage,contacts:contactPage,scanner:scannerPage,uploads:uploadsPage})[p]()}catch(e){$('#content').innerHTML=`<div class="card danger">Erro: ${esc(e.message)}</div>`}}
 
 function scannerPage(){
- $('#content').innerHTML = '<div class="notice">Digitalização local: a imagem permanece no seu dispositivo até você decidir baixá-la. Esta ferramenta não extrai dados pessoais nem envia arquivos ao cadastro eleitoral.</div>'+
+ $('#content').innerHTML = '<div class="notice">Digitalização com armazenamento local no servidor: a imagem e o texto lido ficam no banco desta instalação. Use a leitura assistida para conferir e cadastrar cada pessoa no Eleitorado; nada é enviado a serviços externos além do modelo de OCR do navegador.</div>'+
  '<div class="card section"><h3>Escaneador de páginas</h3><p>Fotografe uma página ou selecione uma imagem. Confira a nitidez antes de salvar.</p>'+
  '<label>Fotografar ou selecionar página<input id="scanFile" type="file" accept="image/*" capture="environment"></label>'+
  '<div class="toolbar" style="margin-top:12px;display:flex;gap:10px;flex-wrap:wrap">'+
@@ -86,18 +86,27 @@ function alertHTML(a={}){
 }
 function bars(rows,formatter=fmt){if(!rows.length)return '<p class="muted">Sem registros.</p>';let max=Math.max(...rows.map(x=>Number(x[1])),1);return `<div class="metric-bars">${rows.map(([name,value])=>`<div><div class="bar-label"><span>${esc(name)}</span><b>${formatter(value)}</b></div><div class="bar-track"><div class="bar-fill" style="width:${Math.max(1,Number(value)/max*100)}%"></div></div></div>`).join('')}</div>`}
 async function leaderPage(){
- const cols=['Nome','Apelido','Telefone','Bairro','Zona','Seção','Atuação','Reuniões','Ações'];
+ leadersAll=await api('leaders?scope=all');
+ const view=leaderScope==='all'?leadersAll:leadersAll.filter(l=>leaderScope==='archived'?l.archived:!l.archived);
+ const cols=['Nome','Apelido','Telefone','Região','Bairro','Endereço','Zona','Seção','Atuação','Observações','Situação','Reuniões','Ações'];
+ const notes=l=>(l.notes||'').length>80?esc(l.notes.slice(0,80))+'…':esc(l.notes);
  $('#content').innerHTML='<div class="notice">Cadastro administrativo. Para dados reais, configure primeiro banco persistente, backups e permissões.</div>'+
- '<div class="card"><h3>Lideranças cadastradas ('+leaders.length+')</h3>'+
- table(cols,leaders.map(l=>`<tr><td><b>${esc(l.name)}</b></td><td>${esc(l.nickname)}</td><td>${esc(l.phone)}</td><td>${esc(l.neighborhood)}</td><td>${esc(l.electoral_zone)}</td><td>${esc(l.electoral_section)}</td><td>${esc(l.activity)}</td><td>${esc(l.last_meeting||'Nunca')}</td><td><button class="outline" data-profile="${l.id}">Ficha</button> <button class="outline" data-edit="${l.id}">Editar</button> <button class="outline" data-archive="${l.id}">Arquivar</button></td></tr>`))+'</div>'+
+ '<div class="card"><label>Situação do cadastro<select id="leaderScope">'+
+ ['active','archived','all'].map(v=>`<option value="${v}" ${leaderScope===v?'selected':''}>${v==='active'?'Ativos':v==='archived'?'Arquivados':'Todos'}</option>`).join('')+'</select></label>'+
+ '<h3>Lideranças cadastradas ('+view.length+')</h3>'+
+ table(cols,view.map(l=>`<tr><td><b>${esc(l.name)}</b></td><td>${esc(l.nickname)}</td><td>${esc(l.phone)}</td><td>${esc(l.region)}</td><td>${esc(l.neighborhood)}</td><td>${esc(l.address)}</td><td>${esc(l.electoral_zone)}</td><td>${esc(l.electoral_section)}</td><td>${esc(l.activity)}</td><td>${notes(l)}</td><td><span class="tag ${l.archived?'rejected':'attended'}">${l.archived?'Arquivado':'Ativo'}</span></td><td>${esc(l.last_meeting||'Nunca')}</td><td><button class="outline" data-profile="${l.id}">Ficha</button>${l.archived?` <button class="outline" data-restore="${l.id}">Reativar</button>`:` <button class="outline" data-edit="${l.id}">Editar</button> <button class="outline" data-archive="${l.id}">Arquivar</button>`}</td></tr>`))+'</div>'+
  '<div id="leaderDetails"></div>'+
  form('Adicionar liderança',leaderFields(),'leaderForm');
+ $('#leaderScope').onchange=e=>{leaderScope=e.target.value;leaderPage()};
  attachForm('leaderForm','leaders');
  document.querySelectorAll('[data-profile]').forEach(x=>x.onclick=()=>openLeaderProfile(Number(x.dataset.profile)));
  document.querySelectorAll('[data-edit]').forEach(x=>x.onclick=()=>editLeader(Number(x.dataset.edit)));
  document.querySelectorAll('[data-archive]').forEach(x=>x.onclick=async()=>{
    if(!confirm('Arquivar liderança? O histórico será preservado.'))return;
    try{await api('leaders/archive','POST',{id:Number(x.dataset.archive)});await navigate('leaders')}catch(e){alert(e.message)}
+ });
+ document.querySelectorAll('[data-restore]').forEach(x=>x.onclick=async()=>{
+   try{await api('leaders/restore','POST',{id:Number(x.dataset.restore)});msg('Liderança reativada');await navigate('leaders')}catch(e){alert(e.message)}
  });
 }
 function leaderFields(){
@@ -109,7 +118,7 @@ function leaderFields(){
  '<label class="wide">Observações<textarea name="notes"></textarea></label>';
 }
 function editLeader(id){
- const l=leaders.find(x=>x.id===id);if(!l)return;
+ const l=leadersAll.find(x=>x.id===id)||leaders.find(x=>x.id===id);if(!l)return;
  const area=$('#leaderDetails');
  area.innerHTML=form('Editar liderança: '+esc(l.name),leaderFields(),'editLeaderForm');
  const f=$('#editLeaderForm');
@@ -118,7 +127,7 @@ function editLeader(id){
  area.scrollIntoView({behavior:'smooth',block:'start'});
 }
 async function openLeaderProfile(id){
- const l=leaders.find(x=>x.id===id);if(!l)return;
+ const l=leadersAll.find(x=>x.id===id)||leaders.find(x=>x.id===id);if(!l)return;
  const [meetings,demands,expenses,contacts]=await Promise.all([api('meetings'),api('demands'),api('expenses'),api('contacts')]);
  const m=meetings.filter(x=>x.leader_id===id),d=demands.filter(x=>x.leader_id===id),ex=expenses.filter(x=>x.leader_id===id),c=contacts.filter(x=>x.leader_id===id);
  $('#leaderDetails').innerHTML=`<div class="card section"><h3>Ficha: ${esc(l.name)}</h3><p><b>Bairro:</b> ${esc(l.neighborhood)} · <b>Zona:</b> ${esc(l.electoral_zone)} · <b>Seção:</b> ${esc(l.electoral_section)}</p><p><b>Contato:</b> ${esc(l.phone)} · <b>Atuação:</b> ${esc(l.activity)}</p><p><b>Endereço administrativo:</b> ${esc(l.address||'—')}</p><p>${esc(l.notes)}</p><h4>Diário / atas</h4>${table(['Data','Tipo','Resumo','Próxima ação'],m.map(x=>`<tr><td>${esc(x.meeting_date)}</td><td>${esc(x.kind)}</td><td>${esc(x.summary)}</td><td>${esc(x.next_action)}</td></tr>`))}<h4>Demandas</h4>${table(['Abertura','Descrição','Situação','Prazo'],d.map(x=>`<tr><td>${esc(x.opened_at)}</td><td>${esc(x.description)}</td><td>${esc(x.status)}</td><td>${esc(x.due_date)}</td></tr>`))}<h4>Despesas registradas</h4>${table(['Data','Finalidade','Valor'],ex.map(x=>`<tr><td>${esc(x.expense_date)}</td><td>${esc(x.description)}</td><td>${money(x.amount)}</td></tr>`))}<h4>Eleitorado — cadastro administrativo vinculados</h4><p>${fmt(c.length)} registros</p></div>`;
